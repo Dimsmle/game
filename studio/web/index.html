@@ -301,7 +301,7 @@
 </dialog>
 <div class="overlay hidden" id="settingsOverlay">
   <div class="settings-dialog">
-    <div class="settings-head"><div><h2>本地模型与服务设置</h2><p>更改后保存；密钥使用环境变量，不保存在浏览器配置里</p></div>
+    <div class="settings-head"><div><h2>本地模型与服务设置</h2><p>已保存设置优先于源码默认值；设置文件为 %LOCALAPPDATA%\CharacterLab\settings.json，直接修改文件后需重启。</p></div>
       <button id="closeSettings" class="mini-btn">关闭 ✕</button></div>
     <div class="settings-grid">
       <label>AI 模式<select id="cfgMode"><option value="demo">离线演示</option><option value="deepseek">DeepSeek 官方 API</option><option value="openai">OpenAI 兼容接口</option></select></label>
@@ -325,7 +325,7 @@
       <label>图片生成模型（可选）<input id="cfgImageModel" placeholder="支持 b64_json 的图像模型 ID"></label>
       <label class="wide">PsbDecompile 导出文件夹<input id="cfgAssetsDir" placeholder="D:\Exports\kan_0"></label>
     </div>
-    <div class="settings-footer"><span>DeepSeek 使用 DEEPSEEK_API_KEY；自定义接口使用 LLM_API_KEY。密钥仅从启动进程环境读取。</span><button id="saveSettings" class="btn">保存配置</button></div>
+    <div class="settings-footer"><span>密钥读取：同名环境变量优先，其次本机 local_secrets.json；不会保存到浏览器或普通设置。DeepSeek 使用 DEEPSEEK_API_KEY。</span><button id="saveSettings" class="btn">保存配置</button></div>
   </div>
 </div>
 <script src="/frame_sequence.js"></script>

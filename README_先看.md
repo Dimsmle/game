@@ -18,7 +18,8 @@ shi 全量素材分类及 Ｂ 类表情支持。重启程序生效，见 [本机
 详见 [v0.11 说明与边界](docs/V0.11_SENTENCE_REPLIES.md)。
 
 设置 → 自由聊天可在舞台输入文字；连接设置中可选 DeepSeek 官方 API（deepseek-flash）。
-密钥仅从本机 `DEEPSEEK_API_KEY` 环境变量读取，设置后重启程序；不要发到聊天里。
+密钥可从项目根目录 `local_secrets.json` 读取，同名环境变量优先；旧程序须关闭后重启。
+已保存设置会覆盖源码默认值，配置位置和私有密钥说明见 [设置与密钥](docs/SETTINGS_AND_SECRETS.md)。
 Qwen Base / GPT-SoVITS / 系统语音可选，暂不安装 Whisper 或本地 LLM。
 详见 [v0.10 AI 基础实施说明](docs/V0.10_AI_FOUNDATION.md)，含已实现、实测及未验收项目。
 

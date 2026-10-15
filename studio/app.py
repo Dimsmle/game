@@ -32,7 +32,6 @@ import webbrowser
 
 from studio import backgrounds, behavior, runtime as behavior_runtime, renderers, diagnostics, model_meta
 from studio import replies
-os.environ["DEEPSEEK_API_KEY"] = "sk-9f8b53701a73428cb6bc1631ea11ba56"
 ROOT = Path(__file__).resolve().parent
 WEB = ROOT / "web"
 DATA = ROOT / "data"
@@ -488,11 +487,12 @@ def validate_settings(obj):
     return out
 
 def http_json(url,payload,key_env="",timeout=80):
+    from .credentials import get_api_key
     validate_api_url(url)
     data=json.dumps(payload,ensure_ascii=False).encode("utf-8")
     headers={"Content-Type":"application/json","Accept":"application/json"}
-    if key_env and os.environ.get(key_env,""):
-        headers["Authorization"]="Bearer "+os.environ[key_env]
+    key=get_api_key(key_env) if key_env else ''
+    if key:headers["Authorization"]="Bearer "+key
     req=urllib.request.Request(url,data=data,headers=headers,method="POST")
     try:
         with urllib.request.urlopen(req,timeout=timeout) as response:
@@ -965,7 +965,10 @@ class Handler(BaseHTTPRequestHandler):
             if path=="/api/runtime":
                 return self.reply(200,RUNTIME.snapshot())
             if path=="/api/provider_status":
-                return self.reply(200,{"deepseek_key_present":bool(os.environ.get("DEEPSEEK_API_KEY")),
+                from .credentials import status
+                credential=status()
+                return self.reply(200,{"deepseek_key_present":credential['present'],
+                    "credential_source":credential['source'],"credential_error":credential.get('error',''),
                     "llm_metrics":LLM_METRICS,"tts_metrics":TTS_SERVICE.last_metrics,
                     "stt_enabled":STATE["settings"].get("stt_enabled",False)})
             if path=="/api/log_tail":

@@ -1,5 +1,10 @@
 # AGENTS.md — Character Studio v0.12 P1
 
+Credentials: read `docs/SETTINGS_AND_SECRETS.md`. Use studio.credentials.get_api_key,
+never set a literal key in app.py or merge private credentials into public settings.
+Development local_secrets.json is ignored and excluded from source releases.
+Environment overrides the private file; tests must explicitly isolate that file.
+
 P0/P1 prerequisites for v0.13 are implemented. Read `docs/V0.12_P0_P1_REPORT.md`,
 `docs/GAME_STATE_SCHEMA.md` and `docs/AI_EVENT_SYSTEM.md` before further work.
 NEXT is P1.5a (CharacterCard, player Persona, six narrative presets), then P1.5b

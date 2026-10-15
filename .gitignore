@@ -13,4 +13,7 @@ character_exports/
 *.sqlite3-*
 .env
 .env.*
+local_secrets.json
+local_secrets.*
+!local_secrets.example.json
 

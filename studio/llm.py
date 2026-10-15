@@ -1,12 +1,12 @@
 """Small, cancellable OpenAI-compatible transport. No SDK or model installation."""
 from __future__ import annotations
 import json
-import os
 import re
 import time
 import urllib.error
 import urllib.request
 from typing import Protocol
+from .credentials import get_api_key
 
 
 class Cancelled(RuntimeError):
@@ -51,8 +51,8 @@ class OpenAICompatibleProvider:
         base='https://api.deepseek.com' if deepseek else s['llm_url'].rstrip('/')
         url=base if base.endswith('/chat/completions') else base+'/chat/completions'
         env='DEEPSEEK_API_KEY' if deepseek else 'LLM_API_KEY'
-        key=os.environ.get(env,'')
-        if deepseek and not key:raise RuntimeError('请在启动程序前设置 DEEPSEEK_API_KEY 环境变量；不要把密钥发到聊天里。')
+        key=get_api_key(env)
+        if deepseek and not key:raise RuntimeError('请在本机 local_secrets.json 填写 DEEPSEEK_API_KEY，或设置同名环境变量；不要把密钥发到聊天里。')
         payload={'model':s['llm_model'], 'messages':messages, 'stream':True,
                  'temperature':0.65, 'max_tokens':1600, 'response_format':{'type':'json_object'}}
         if deepseek:payload['thinking']={'type':'disabled'}

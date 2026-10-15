@@ -53,7 +53,7 @@ class TransportTests(unittest.TestCase):
         self.assertEqual(value,content)
 
     def test_missing_key_and_redacted_http_error(self):
-        with patch.dict(os.environ,{},clear=True):
+        with patch.dict(os.environ,{},clear=True),patch('studio.credentials.read_file',return_value={}):
             with self.assertRaisesRegex(RuntimeError,'DEEPSEEK_API_KEY'):
                 list(llm.OpenAICompatibleProvider(dict(app.DEFAULT_SETTINGS,llm_mode='deepseek')).stream([],threading.Event()))
         error=urllib.error.HTTPError('https://example.invalid',401,'secret',{},io.BytesIO(b'sensitive body'))
@@ -74,6 +74,13 @@ class TransportTests(unittest.TestCase):
 
 
 class PipelineTests(unittest.TestCase):
+    def test_saved_settings_override_source_defaults(self):
+        app.SETTINGS_FILE.write_text(json.dumps({'role_name':'已保存姓名','persona':'已保存人设','llm_mode':'demo'}),encoding='utf-8')
+        with patch.dict(app.DEFAULT_SETTINGS,{'role_name':'新的默认姓名','persona':'新的源码默认人设'}):
+            app.init()
+        self.assertEqual(app.STATE['settings']['role_name'],'已保存姓名')
+        self.assertEqual(app.STATE['settings']['persona'],'已保存人设')
+
     def test_complete_persona_in_first_and_later_system_context(self):
         card='日常角色资料。'*230+'末尾约束：不要替用户做决定。'
         self.assertGreater(len(card),1000)
