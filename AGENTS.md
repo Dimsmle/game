@@ -1,5 +1,18 @@
 # AGENTS.md — Character Studio v0.14.1 P1.5
 
+## Current development: v0.15 integrated gameplay
+
+The user has authorized P2–P5 integration on feat/v015-integrated-gameplay.
+Read docs/V0.15_INTEGRATION_REPORT.md and docs/API_TEST_POLICY.md first.
+The older instruction below to not start P2–P5 is superseded by this request.
+Keep the existing GameStore, ReplyTurn, credentials, RP Composer and renderer.
+gameplay_core.director is a pure reference model, NOT the authoritative commit path.
+The separate v0.15.2 preview workbench/PreviewStore is deliberately not installed.
+Run node tests/test_gameplay_stage.js and node tests/test_touch_geometry.js too.
+Do not repeat paid DeepSeek tests already recorded in API_TEST_POLICY.md.
+Normal unit tests must remain offline; no bulk live chats or hidden retries.
+Real scene/CG/touch approvals are user decisions, never inferred from filenames.
+
 Credentials: read `docs/SETTINGS_AND_SECRETS.md`. Use studio.credentials.get_api_key,
 never set a literal key in app.py or merge private credentials into public settings.
 Development local_secrets.json is ignored and excluded from source releases.

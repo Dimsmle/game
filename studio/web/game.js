@@ -6,6 +6,8 @@
  let scenarios=[],selectedStory=null,currentNode=null,textTimer=null,shown=0,typingText="";
  let warmGeneration=0,ready=false,chatMode=false,chatGeneration=0,chatBusy=false;
  let revealStream=false;
+ const gameplayEnabled=typeof GameplayStage!=='undefined';
+ let gameplayController=null,closeGameplayMedia=null;
  const picker=el("gamePicker"),menu=el("gameMenu"),choice=el("gameChoice");
  const request=async(path,data)=>{
   const response=await fetch(path,data===undefined?{}:{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(data)});
@@ -24,10 +26,10 @@
   textTimer=setInterval(()=>{
    shown=Math.min(full.length,shown+1);el("gameText").textContent=full.slice(0,shown);
    bridge.textSpeech(shown<full.length);
-   if(shown===full.length)clearInterval(textTimer);
+   if(shown===full.length){clearInterval(textTimer);maybeCompleteTurn();}
   },27);
  }
- function finishText(){clearInterval(textTimer);bridge.textSpeech(false);shown=typingText.length;el("gameText").textContent=typingText;}
+ function finishText(){clearInterval(textTimer);bridge.textSpeech(false);shown=typingText.length;el("gameText").textContent=typingText;maybeCompleteTurn();}
  function streamText(preview){
   if(!preview.startsWith(typingText)){shown=0;el("gameText").textContent="";}
   typingText=preview;
@@ -100,16 +102,24 @@
   onState(state){
    if(!chatMode)return;
    setBusy(state.loading);el("gameNext").hidden=!state.turn;
-   el("gameNext").disabled=state.loading||(!state.hasNext&&(!state.error||state.error.voice));
-   el("gameNext").textContent=state.error&&!state.error.voice?"重试这一句 ↻":state.hasNext?"下一句 ▷":"本轮已读完";
+   el("gameNext").disabled=state.loading||(!state.hasNext&&!state.speaking&&!state.error);
+   el("gameNext").textContent=state.error&&!state.error.voice?"重试这一句 ↻":!state.hasNext&&(state.speaking||state.error?.voice)?"跳过语音 ▷":state.hasNext?"下一句 ▷":"本轮已读完";
    if(state.error)el("gameHint").textContent=(state.error.voice?"语音暂不可用 · ":"本句准备失败 · ")+state.error.message;
+   maybeCompleteTurn();
   }
  });
+ function maybeCompleteTurn(){
+  if(!gameplayController||!chatMode||shown<typingText.length)return;
+  const state=replyPlayer.snapshot();
+  if(!state.turn||state.loading||state.hasNext||state.speaking||!state.voiceSettled)return;
+  gameplayController.complete(state.turn).catch(error=>{el('gameHint').textContent=error.message;});
+ }
  async function advance(){
   if(chatMode){
    if(chatBusy&&!replyPlayer.turn){revealStream=true;finishText();return;}
    if(replyPlayer.loading)return;
    if((!replyPlayer.error||replyPlayer.error.voice)&&shown<typingText.length){finishText();return;}
+   if(!replyPlayer.snapshot().hasNext&&(replyPlayer.speaking||replyPlayer.error?.voice)){await replyPlayer.skipVoice();return;}
    await replyPlayer.next();return;
   }
   if(director.loading)return;
@@ -166,9 +176,21 @@
    showDialog(picker);
   }catch(error){el("gameText").textContent=error.message;}
  }
- function openLocations(){
+ async function openLocations(){
   ++warmGeneration;
   menu.close();el("gamePickerEyebrow").textContent="让画面换一种心情";
+  if(gameplayController){
+   await stopChat();
+   try{
+    const result=await request('/api/game/locations');
+    el('gamePickerTitle').textContent='已审核地点';el('gamePickerNote').textContent=result.items.length?'选择地点后先预加载，再提交存档。':'还没有人工审核地点，请先打开「玩法与素材审核」。';
+    setOptions(el('gamePickerOptions'),result.items.flatMap(item=>item.times.map(period=>({title:item.display_name+' · '+period,action:async()=>{
+     try{await gameplayController.transition('scene',{location_id:item.location_id,time_of_day:period});picker.close();el('gamePlace').textContent=item.display_name;}
+     catch(error){el('gamePickerNote').textContent=error.message;}
+    }}))));showDialog(picker);
+   }catch(error){el('gameHint').textContent=error.message;}
+   return;
+  }
   el("gamePickerTitle").textContent="切换场景";
   el("gamePickerNote").textContent="已绑定的背景会直接显示；未绑定时使用程序内置的氛围场景。";
   const options=bridge.scenes();
@@ -208,6 +230,8 @@
  el("gameDialogue").onclick=()=>advance();
  el("gameSettings").onclick=()=>showDialog(menu);
  async function stopChat(){
+  if(closeGameplayMedia)await closeGameplayMedia();
+  gameplayController?.cancel();
   replyPlayer.stop();setBusy(false);el("gameNext").hidden=chatMode;
   clearInterval(textTimer);
   bridge.textSpeech(false);
@@ -224,6 +248,7 @@
   el("gameEmotion").textContent="";el("gameText").textContent="我在这里。想聊些什么？";
   el("gameHint").textContent=bridge.demo?"离线演示 · 输入“演示逐句表情”体验切换":"回复文字由你配置的 API 生成；情绪和动作在本地校验";
   el("gameChatInput").focus();
+  if(gameplayController)gameplayController.restore().catch(error=>{el('gameHint').textContent=error.message;});
  }
  el("gameChat").onclick=openChat;
  el("gameChatForm").onclick=event=>event.stopPropagation();
@@ -270,6 +295,52 @@
    if(document.body.classList.contains("game-mode"))openChat();
   }
  };
+ if(gameplayEnabled){
+  const offer=document.createElement('dialog');offer.className='game-modal';
+  const title=document.createElement('h2'),options=document.createElement('div'),dismiss=document.createElement('button');dismiss.textContent='这次先不用';
+  offer.append(title,options,dismiss);document.body.append(offer);
+  let offeredInstance=null;
+  dismiss.onclick=async()=>{try{if(offeredInstance)await request('/api/game/event/dismiss',{instance_id:offeredInstance});offer.close();}catch(error){el('gameHint').textContent=error.message;}};
+  offer.addEventListener('cancel',event=>{event.preventDefault();dismiss.click();});
+  const mediaDialog=document.createElement('dialog');mediaDialog.className='game-modal';
+  const mediaImage=document.createElement('img'),audio=document.createElement('audio'),mediaClose=document.createElement('button');mediaImage.style.maxWidth='100%';audio.controls=true;mediaClose.textContent='继续／关闭演出';mediaDialog.append(mediaImage,audio,mediaClose);document.body.append(mediaDialog);
+  const mediaCache=new Map();
+  const preload=async asset=>{
+   if(mediaCache.has(asset.url))return mediaCache.get(asset.url);
+   let result;
+   if(['bgm','se'].includes(asset.category)){
+    const sound=new Audio();sound.preload='auto';sound.src=asset.url;
+    await new Promise((resolve,reject)=>{const timer=setTimeout(()=>reject(Error('音频加载超时')),15000);sound.oncanplaythrough=()=>{clearTimeout(timer);resolve();};sound.onerror=()=>{clearTimeout(timer);reject(Error('音频无法解码'));};sound.load();});
+    result={asset_id:asset.asset_id,audio:sound};
+   }else{const image=new Image();image.src=asset.url;await image.decode();result={asset_id:asset.asset_id,image};}
+   mediaCache.set(asset.url,result);while(mediaCache.size>24)mediaCache.delete(mediaCache.keys().next().value);return result;
+  };
+  gameplayController=new GameplayStage({request,preload,applyScene:bridge.applyVerifiedScene,
+   onOffer(event){offeredInstance=event?.instance_id||null;if(!event){offer.close();return;}title.textContent=event.title;options.replaceChildren();
+    for(const option of event.choices){const button=document.createElement('button');button.textContent=option.label;button.onclick=async()=>{button.disabled=true;try{await gameplayController.transition('event',{instance_id:event.instance_id,choice_id:option.id});}catch(error){el('gameHint').textContent=error.message;button.disabled=false;}};options.append(button);}
+    if(!offer.open)offer.showModal();
+   },
+   async playMedia(asset,loaded){
+    const token=asset.playback_token;
+    await bridge.stopSpeech();mediaImage.hidden=['bgm','se'].includes(asset.category);audio.hidden=!mediaImage.hidden;
+    if(mediaImage.hidden){audio.src=asset.url;audio.play().catch(()=>{el('gameHint').textContent='点击音频播放按钮继续';});}else mediaImage.src=asset.url;
+    if(!mediaDialog.open)mediaDialog.showModal();
+    await new Promise(resolve=>{const close=async()=>{closeGameplayMedia=null;audio.pause();mediaDialog.close();try{await request('/api/game/media/end',{token});}finally{resolve();}};closeGameplayMedia=close;mediaClose.onclick=close;mediaDialog.oncancel=event=>{event.preventDefault();close();};});
+   }});
+  const link=document.createElement('a');link.href='/gameplay/';link.textContent='玩法与素材审核';link.className='btn';menu.append(link);
+  const mirrorLabel=document.createElement('label'),mirrorToggle=document.createElement('input');mirrorToggle.type='checkbox';mirrorToggle.onchange=()=>bridge.mirror(mirrorToggle.checked);mirrorLabel.append(mirrorToggle,document.createTextNode('水平镜像角色'));menu.append(mirrorLabel);
+  const unlock=document.createElement('button');unlock.textContent='解除地点锁（允许已审核时间变体）';unlock.onclick=async()=>{try{await request('/api/game/scene/unlock',{});el('gameHint').textContent='已解除地点锁';}catch(error){el('gameHint').textContent=error.message;}};menu.append(unlock);
+  setInterval(async()=>{if(!chatMode||chatBusy||menu.open||picker.open||offer.open||mediaDialog.open)return;try{const result=await request('/api/game/scene/auto',{});if(result.prepared)await gameplayController.transition('prepared',result.prepared);}catch(error){el('gameHint').textContent=error.message;}},20000);
+  const gallery=document.createElement('button');gallery.textContent='已解锁媒体图鉴';gallery.onclick=async()=>{
+   try{await stopChat();const result=await request('/api/game/gallery');setOptions(el('gamePickerOptions'),result.items.map(item=>({title:item.title,action:async()=>{try{const lease=await request('/api/game/media/begin',{asset_id:item.asset_id});const loaded=await preload(lease.media);await gameplayController.playMedia(lease.media,[loaded]);}catch(error){el('gamePickerNote').textContent=error.message;}}})));el('gamePickerTitle').textContent='已解锁媒体';el('gamePickerNote').textContent=result.items.length?'只有本存档事件解锁的审核素材可复播。':'尚无解锁媒体。';menu.close();showDialog(picker);}catch(error){el('gameHint').textContent=error.message;}
+  };menu.append(gallery);
+  el('stage').addEventListener('click',async event=>{
+   if(!chatMode||chatBusy||offer.open||mediaDialog.open||menu.open||picker.open||!el('settingsOverlay').classList.contains('hidden'))return;
+   const point=bridge.touchCoordinates(event);if(!point)return;
+   try{const result=await request('/api/game/touch',{...point,request_id:'t_'+crypto.randomUUID().replaceAll('-',''),gesture:'tap'});if(result.text){el('gameChatInput').value=result.text;el('gameChatForm').requestSubmit();}}
+   catch(error){el('gameHint').textContent=error.message;}
+  });
+ }
  const hud=typeof GameStateHUD==='undefined'?null:new GameStateHUD({
   request,beforeSwitch:stopChat,
   async onSwitch(){await bridge.profileChanged();await openChat();},

@@ -52,8 +52,8 @@ def validate_state(value):
     identifier(scene['location_id'])
     if scene['time_of_day'] not in ('unknown','morning','day','evening','night') or type(scene['lock']) is not bool:raise ValueError('地点状态无效')
     if value['event']!={'instance_id':None,'status':'idle'}:raise ValueError('P1 尚未开放事件')
-    if value['clock_mode']!='manual':raise ValueError('P1 尚未开放自动时钟')
-    if not isinstance(value['toggles'],dict) or set(value['toggles'])!={'proactive_events','touch_interaction'} or any(item is not False for item in value['toggles'].values()):raise ValueError('P1 尚未开放主动事件和触摸')
+    if value['clock_mode'] not in ('manual','system','game','off'):raise ValueError('时钟模式无效')
+    if not isinstance(value['toggles'],dict) or set(value['toggles'])!={'proactive_events','touch_interaction'} or any(type(item) is not bool for item in value['toggles'].values()):raise ValueError('互动开关无效')
     return deepcopy(value)
 
 
@@ -89,5 +89,5 @@ def prompt_context(state):
     value=validate_state(state)
     return ('\n可信游戏存档（仅供语气参考，不报数值，不覆盖人物核心，不代表现实关系）：'
             +json.dumps({key:value[key] for key in ('stats','relationship_stage','scene','flags')},ensure_ascii=False)
-            +'。没有已确认事件；不得自行声称事件、地点移动或关系里程碑已经发生。'
+            +'。只有本机已确认事件日志可作为共同经历；不得自行声称未确认的事件、地点移动或关系里程碑已经发生。'
             '禁止用回复修改数值、存档或文件。\n')

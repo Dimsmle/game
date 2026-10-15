@@ -20,6 +20,19 @@ const RP = (() => {
     clearTimeout(toastTimer);
     toastTimer=setTimeout(()=>node.className='',3500);
   }
+  async function confirmLocal(message) {
+    // HTML dialog works consistently in WebView2 and automated in-app browsers.
+    const dialog=document.createElement('dialog');dialog.className='rp-confirm';
+    const text=document.createElement('p');text.textContent=message;
+    const yes=document.createElement('button'),no=document.createElement('button');
+    yes.textContent='确认';no.textContent='取消';no.className='secondary';
+    dialog.append(text,no,yes);document.body.append(dialog);
+    return await new Promise(resolve=>{
+      const finish=value=>{dialog.close();dialog.remove();resolve(value);};
+      yes.onclick=()=>finish(true);no.onclick=()=>finish(false);
+      dialog.oncancel=event=>{event.preventDefault();finish(false);};dialog.showModal();
+    });
+  }
   async function api(path, obj) {
     const opt=obj===undefined ? {} : {
       method:'POST',headers:{'Content-Type':'application/json'},
@@ -97,7 +110,7 @@ const RP = (() => {
     for (const [a,b] of definitions) dl.append(cell('dt',a),cell('dd',b));
     const choices=$('events');choices.replaceChildren();
     if (status.authority_mode==='game_db') {
-      choices.append(cell('div','当前版本已接入主项目 GameStore：好感、信任与事件由主项目持久管理。P3 正式动态事件未开放；这里禁止额外提供第二套属性奖励。','muted'));
+      choices.append(cell('div','主项目 GameStore 是唯一属性权威。这里只禁用独立 RP 演示奖励；v0.15 开发中的真实邀请在角色舞台经玩家选择提交，素材和触摸请到「玩法与素材审核」配置。','muted'));
     }
     for (const item of status.events) appendTextRow(
       choices,item.title,item.description,'发起演示',()=>offerEvent(item.event_id));
@@ -349,7 +362,7 @@ const RP = (() => {
   }
   async function deleteLore() {
     if (!currentLore)return show('没有可删除的条目',true);
-    if (!confirm('确认删除世界书条目：'+currentLore.data.title+'？'))return;
+    if (!await confirmLocal('确认删除世界书条目：'+currentLore.data.title+'？'))return;
     try {
       await api('/api/roleplay/lore/delete',{
         card_id:status.binding.card_id,entry_id:currentLore.data.entry_id,
@@ -372,7 +385,7 @@ const RP = (() => {
   async function previewPrompt() {
     const message=txt('prompt-query').trim();
     if (!message)return show('请输入测试话题',true);
-    if (!confirm('将显示角色人设与世界书的本地预览文本。请确认当前屏幕不会被不相关人员看到。'))return;
+    if (!await confirmLocal('将显示角色人设与世界书的本地预览文本。请确认当前屏幕不会被不相关人员看到。'))return;
     try {
       const r=await api('/api/roleplay/prompt_preview',{
         confirm:true,text:message,send_memory:false

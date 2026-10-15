@@ -486,7 +486,9 @@ class StudioHandler(studio.Handler):
             selected=discover_model(root,requested)
             if selected is None or not selected["available"]:
                 raise ValueError("模型尚未解包完整，请导出对应 JSON 和 PNG")
-            with studio.LOCK:
+            with studio.CHAT_LOCK,studio.LOCK:
+                studio.game_store().cancel_events();studio.REPLY_TURN.clear()
+                if studio.ACTIVE_CHAT:studio.ACTIVE_CHAT['cancel'].set()
                 files,model=prepare_character(root,False,requested)
                 register_pose_assets(root,files,model,requested)
             return self.reply(200,{

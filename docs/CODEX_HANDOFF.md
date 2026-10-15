@@ -1,5 +1,8 @@
 # CODEX HANDOFF — 从 v0.7 继续开发
 
+当前进度以 `V0.15_INTEGRATION_REPORT.md` 为准；历史任务仅作背景。
+真实 DeepSeek 测试须遵守 `API_TEST_POLICY.md`，不要重复旧的批量对话验收。
+
 更新：v0.8 已完成末帧叠层修复、独立 CPU Bezier 点头帧序列、播放器与验收门。
 请先阅读 `V0.8_LOCAL_RELEASE.md`，再使用以下原始规划；不要重复已完成的静态问题诊断。
 

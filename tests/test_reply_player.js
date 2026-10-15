@@ -11,6 +11,7 @@ const tick=()=>new Promise(resolve=>setImmediate(resolve));
  });
  await player.start(turn);assert.deepEqual(applied,[0]);assert.deepEqual(shown,['surprised']);
  assert.equal(player.speaking,true);
+ assert.equal(player.snapshot().voiceSettled,false);
  await player.next();assert.deepEqual(applied,[0,1]);assert.deepEqual(shown,['surprised','shy']);
  player.stop();resolveVoice?.({error:'late error'});await tick();
  assert.equal(player.error,null);assert.equal(await player.next(),false);assert.equal(stops,2);
@@ -23,5 +24,6 @@ const tick=()=>new Promise(resolve=>setImmediate(resolve));
  assert.equal(await retry.start(turn),false);assert.match(retry.error.message,/image failed/);
  assert.equal(await retry.next(),true);await tick();assert.equal(retry.index,0);assert.equal(retry.error.voice,true);
  await retry.next();await tick();assert.equal(retry.index,1); // voice error must not replay the previous sentence
+ await retry.skipVoice();assert.equal(retry.snapshot().voiceSettled,true);assert.equal(retry.error,null);
  console.log('ReplyPlayer: ordered sentences, voice interruption, stale-load isolation, retry and optional TTS passed');
 })().catch(error=>{console.error(error);process.exitCode=1;});

@@ -187,6 +187,7 @@ class PromptComposer:
                           for p in card["example_dialogues"][:5])))
 
         trace={"card_id":card["card_id"],"card_revision":snapshot["card_revision"],
+            "candidate_event_ids":list(snapshot.get('candidate_event_ids',[])),
             "preset_id":preset["preset_id"],"preset_revision":snapshot["preset_revision"],
             "game_state_revision":snapshot["state_revision"],"epoch":snapshot["epoch"],
             "lore":lore_trace,"selected_lore_ids":[],"lore_tokens_estimate":0,

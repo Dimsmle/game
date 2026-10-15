@@ -147,3 +147,124 @@ class GameStore:
             db.execute('INSERT INTO game_journal(profile_id,event_id,kind,payload_json,idempotency_key,created_at) VALUES(?,?,?,?,?,?)',
                        (profile_id,event_id,'local_rule',json.dumps(payload,ensure_ascii=False),idempotency_key,now.isoformat()))
             db.commit();return value
+
+    def gameplay_binding(self,db):
+        session=dict(db.execute('SELECT profile_id,generation FROM game_session WHERE singleton=1').fetchone())
+        state=self._state(db,session['profile_id'])
+        epoch=int(db.execute("SELECT value FROM rp_meta WHERE key='epoch'").fetchone()[0])
+        catalog=sum(r[0] for r in db.execute('SELECT revision FROM game_catalog'))
+        return dict(session,revision=state['revision'],roleplay_epoch=epoch,catalog_epoch=catalog)
+
+    def move_location(self,binding,location_id,time_of_day,*,locked=True):
+        """Reviewed coordinator only; not an arbitrary client state endpoint."""
+        schema.identifier(location_id)
+        if time_of_day not in ('unknown','morning','day','evening','night') or type(locked) is not bool:raise ValueError('场景状态无效')
+        with connect(self.path) as db:
+            db.execute('BEGIN IMMEDIATE')
+            if self.gameplay_binding(db)!=binding:raise ValueError('场景准备已过期，请重试')
+            state=self._state(db,binding['profile_id'])
+            state['scene']={'location_id':location_id,'time_of_day':time_of_day,'lock':locked}
+            state['revision']+=1;schema.validate_state(state)
+            db.execute('UPDATE game_state SET revision=?,state_json=?,updated_at=? WHERE profile_id=?',
+                (state['revision'],json.dumps(state,ensure_ascii=False),datetime.now().isoformat(),binding['profile_id']))
+            db.commit();return state
+
+    def present_event(self,turn_id,event,binding):
+        """Only called after final sentence activation + display/TTS ACK."""
+        schema.identifier(turn_id)
+        with connect(self.path) as db:
+            db.execute('BEGIN IMMEDIATE')
+            if self.gameplay_binding(db)!=binding:raise ValueError('邀请所在的存档或设定已失效')
+            row=db.execute('SELECT * FROM game_event_instances WHERE turn_id=?',(turn_id,)).fetchone()
+            if row:
+                if row['status']!='presented':raise ValueError('邀请已取消或结束')
+                return self._public_event(row)
+            instance='e_'+uuid.uuid4().hex
+            import time
+            db.execute('INSERT INTO game_event_instances VALUES(?,?,?,?,?,?,?,?,?)',
+                (instance,binding['profile_id'],turn_id,event['id'],'presented',json.dumps(binding),json.dumps(event,ensure_ascii=False),None,time.time()))
+            db.commit()
+        return self.active_event()
+
+    @staticmethod
+    def _public_event(row):
+        event=json.loads(row['definition_json'])
+        return {'instance_id':row['instance_id'],'event_id':event['id'],'title':event['title'],
+                'choices':[{'id':c['id'],'label':c['label']} for c in event['choices']]}
+
+    def active_event(self):
+        import time
+        with connect(self.path) as db:
+            binding=self.gameplay_binding(db)
+            row=db.execute("SELECT * FROM game_event_instances WHERE profile_id=? AND status='presented'",(binding['profile_id'],)).fetchone()
+            if not row or json.loads(row['binding_json'])!=binding or time.time()-row['created_at']>900:return None
+            return self._public_event(row)
+
+    def cancel_events(self,turn_id=None,instance_id=None):
+        with connect(self.path) as db:
+            sql="UPDATE game_event_instances SET status='cancelled' WHERE profile_id=(SELECT profile_id FROM game_session WHERE singleton=1) AND status='presented'"
+            params=[]
+            if turn_id is not None:sql+=' AND turn_id=?';params.append(schema.identifier(turn_id))
+            if instance_id is not None:sql+=' AND instance_id=?';params.append(schema.identifier(instance_id))
+            db.execute(sql,params)
+
+    def choose_event(self,instance,choice,key,binding,verify_resources):
+        """One authority/transaction for choice, daily caps, location, flags and diary."""
+        from .gameplay_core import events
+        import time
+        schema.identifier(instance);schema.identifier(choice);schema.identifier(key)
+        with connect(self.path) as db:
+            db.execute('BEGIN IMMEDIATE')
+            row=db.execute('SELECT * FROM game_event_instances WHERE instance_id=?',(instance,)).fetchone()
+            if not row or row['profile_id']!=binding['profile_id']:raise ValueError('邀请不属于当前存档')
+            session=dict(db.execute('SELECT profile_id,generation FROM game_session WHERE singleton=1').fetchone())
+            if any(binding[k]!=session[k] for k in ('profile_id','generation')):raise ValueError('档案已切换')
+            old=db.execute('SELECT * FROM game_event_choices WHERE instance_id=? OR idempotency_key=?',(instance,key)).fetchone()
+            if old:
+                if old['instance_id']!=instance or old['choice_id']!=choice or old['idempotency_key']!=key:raise ValueError('重复提交编号或选项不一致')
+                return json.loads(old['result_json'])
+            if self.gameplay_binding(db)!=binding or json.loads(row['binding_json'])!=binding:raise ValueError('邀请版本已失效')
+            if row['status']!='presented' or time.time()-row['created_at']>900:raise ValueError('邀请已结束或过期')
+            event=json.loads(row['definition_json']);effect=events.choice_plan(event,choice)['effect']
+            media_result=verify_resources(effect)
+            state=self._state(db,binding['profile_id']);now=datetime.now();used={k:0 for k in schema.RANGES}
+            for saved in db.execute('SELECT payload_json FROM game_journal WHERE profile_id=? AND created_at>=? AND created_at<?',
+                    (binding['profile_id'],now.date().isoformat(),(now.date()+timedelta(days=1)).isoformat())):
+                for k,amount in json.loads(saved[0]).get('applied',{}).items():used[k]+=max(0,amount)
+            value,applied=schema.apply_delta(state,effect['stats'],used,effect.get('milestone'))
+            value['flags'].update(effect['set_flags'])
+            # Decline is guaranteed by the reviewed event schema/coordinator to have no effects.
+            if choice!='decline' and event.get('one_shot_flag'):value['flags'][event['one_shot_flag']]=True
+            if effect['location_id']:
+                value['scene']={'location_id':effect['location_id'],'time_of_day':media_result['scene']['time_of_day'],'lock':True}
+            schema.validate_state(value)
+            result={'instance_id':instance,'event_id':event['id'],'choice_id':choice,'state':value,'applied':applied,**media_result}
+            payload={'applied':applied,'state':value,'event_title':event['title'],'choice_id':choice,'choice_label':next(c['label'] for c in event['choices'] if c['id']==choice)}
+            db.execute('UPDATE game_state SET revision=?,state_json=?,updated_at=? WHERE profile_id=?',
+                (value['revision'],json.dumps(value,ensure_ascii=False),now.isoformat(),binding['profile_id']))
+            db.execute('INSERT INTO game_journal(profile_id,event_id,kind,payload_json,idempotency_key,created_at) VALUES(?,?,?,?,?,?)',
+                (binding['profile_id'],event['id'],'player_choice',json.dumps(payload,ensure_ascii=False),key,now.isoformat()))
+            db.execute('INSERT INTO game_event_choices VALUES(?,?,?,?)',(instance,choice,key,json.dumps(result,ensure_ascii=False)))
+            db.execute("UPDATE game_event_instances SET status='resolved',result_json=? WHERE instance_id=?",(json.dumps(result,ensure_ascii=False),instance))
+            if effect['media_id']:db.execute('INSERT OR IGNORE INTO game_unlocks VALUES(?,?)',(binding['profile_id'],effect['media_id']))
+            db.commit();return result
+
+    def diary(self,limit=20):
+        schema.integer(limit,1,100)
+        with connect(self.path) as db:
+            profile=db.execute('SELECT profile_id FROM game_session WHERE singleton=1').fetchone()[0]
+            rows=db.execute("SELECT event_id,payload_json,created_at FROM game_journal WHERE profile_id=? AND kind='player_choice' ORDER BY id DESC LIMIT ?",(profile,limit)).fetchall()
+            return [dict(event_id=r['event_id'],at=r['created_at'],**{k:v for k,v in json.loads(r['payload_json']).items() if k in ('choice_id','event_title','choice_label')}) for r in reversed(rows)]
+
+    def interaction_settings(self,binding,value):
+        if not isinstance(value,dict) or set(value)-{'proactive_events','touch_interaction','clock_mode','game_hour'} or not {'proactive_events','touch_interaction','clock_mode'}<=set(value):raise ValueError('互动设置字段无效')
+        if any(type(value[k]) is not bool for k in ('proactive_events','touch_interaction')) or value['clock_mode'] not in ('manual','system','game','off'):raise ValueError('互动设置值无效')
+        with connect(self.path) as db:
+            db.execute('BEGIN IMMEDIATE')
+            if self.gameplay_binding(db)!=binding:raise ValueError('存档已变化')
+            state=self._state(db,binding['profile_id'])
+            if 'game_hour' in value:state['flags']['clock_game_hour']=schema.integer(value['game_hour'],0,23)
+            state['toggles']={k:value[k] for k in ('proactive_events','touch_interaction')};state['clock_mode']=value['clock_mode'];state['revision']+=1
+            schema.validate_state(state)
+            db.execute('UPDATE game_state SET revision=?,state_json=?,updated_at=? WHERE profile_id=?',(state['revision'],json.dumps(state),datetime.now().isoformat(),binding['profile_id']))
+            db.commit();return state

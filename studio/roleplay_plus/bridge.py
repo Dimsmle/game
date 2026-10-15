@@ -92,7 +92,7 @@ def _normalize_main_state(value):
     state.update(relationship_stage=domain.choice(
         value["relationship_stage"],domain.STAGES,"关系阶段"),
         location_id=("" if value["scene"]["location_id"]=="unknown"
-                     else domain.ident(value["scene"]["location_id"],"地点 ID")),
+                     else domain.profile_ident(value["scene"]["location_id"])),
         flags=dict(value["flags"]),milestones=list(value.get("milestones",[])))
     return state
 
@@ -112,7 +112,7 @@ def _snapshot():
         snap["state_revision"]=state["revision"]
         snap["main_generation"]=session["generation"]
         snap["profile_id"]=profile_id
-        snap["journal"]=[]  # Demo rp_* events are never official P1 story facts.
+        snap["journal"]=_MAIN_GAME.diary() if hasattr(_MAIN_GAME,'diary') else []
         current_session=_main_snapshot()[0]
         if current_session != session:
             raise RuntimeError("存档切换中，请重新发送")
@@ -140,13 +140,15 @@ def sync_verified_location(location_id,verified_location_ids):
         raise ValueError("P1 主游戏地点由 GameStore/已审核场景流程管理，Roleplay 不允许另外修改")
     return store().sync_verified_location(location_id,verified_location_ids)
 
-def extend_prompt(prompt,settings,user_text,history_items=None):
+def extend_prompt(prompt,settings,user_text,history_items=None,*,extra_context='',candidate_ids=None):
     """Actually influence DeepSeek prompt without altering JSON reply envelope.
 
     Call this after existing core/behavior/memory prompt construction, before
     constructing messages=[{role:system,...}].
     """
     snap=_snapshot()
+    if not isinstance(extra_context,str):raise ValueError('上下文必须是文字')
+    snap['candidate_event_ids']=candidate_ids or []
     if "_roleplay_epoch" in settings and settings['_roleplay_epoch']!=snap['epoch']:
         raise RuntimeError("角色设定已变化，请重新发送")
     if _MAIN_GAME is not None and "_game_session" in settings:
@@ -168,7 +170,7 @@ def extend_prompt(prompt,settings,user_text,history_items=None):
             prompt=prompt.replace(legacy,"【当前人物以角色卡为准】",1)
     is_shared=settings.get("memory_enabled_for_llm",True) is True
     return _COMPOSER.compose(snap,user_text,history_items or [],
-                             base_prompt=prompt,send_memories=is_shared)["prompt"]
+                             base_prompt=prompt+extra_context,send_memories=is_shared)["prompt"]
 
 def _get_param(query,key,default):
     value=query.get(key,[default])

@@ -5,8 +5,8 @@
   constructor({prepare,show,speak=async()=>{},stopSpeech=async()=>{},onState=()=>{}}){
    Object.assign(this,{prepare,show,speak,stopSpeech,onState});this.generation=0;this.stop();
   }
-  stop(){++this.generation;this.turn=null;this.index=-1;this.loading=false;this.error=null;this.current=null;this.speaking=false;this.emit();}
-  snapshot(){return {turn:this.turn,index:this.index,current:this.current,loading:this.loading,speaking:this.speaking,error:this.error,
+  stop(){++this.generation;this.turn=null;this.index=-1;this.loading=false;this.error=null;this.current=null;this.speaking=false;this.voiceSettled=false;this.emit();}
+  snapshot(){return {turn:this.turn,index:this.index,current:this.current,loading:this.loading,speaking:this.speaking,voiceSettled:this.voiceSettled,error:this.error,
    count:this.turn?.segments?.length||0,hasNext:!!this.turn&&this.index<this.turn.segments.length-1};}
   emit(){this.onState(this.snapshot());}
   async start(turn){
@@ -23,7 +23,7 @@
   async _show(index){
    const generation=++this.generation,current=()=>generation===this.generation&&!!this.turn;
    const turn=this.turn;
-   this.loading=true;this.speaking=false;this.error=null;this.emit();
+   this.loading=true;this.speaking=false;this.voiceSettled=false;this.error=null;this.emit();
    try{
     await this.stopSpeech();if(!current())return false;
     const value=await this.prepare(turn,index,current);if(!current())return false;
@@ -31,7 +31,7 @@
     this.speaking=true;this.emit();
     // Do not block next/new input on the duration of a voice clip.
     Promise.resolve(this.speak(value.speech)).then(voice=>{
-     if(!current())return;this.speaking=false;
+     if(!current())return;this.speaking=false;this.voiceSettled=!voice?.error;
      if(voice?.error)this.error={message:voice.error,voice:true,index};
      this.emit();
     }).catch(error=>{if(current()){this.speaking=false;this.error={message:error.message,voice:true,index};this.emit();}});
@@ -41,6 +41,7 @@
     this.loading=false;this.error={message:error.message,index};this.emit();return false;
    }
   }
+  async skipVoice(){const generation=this.generation;await this.stopSpeech();if(generation!==this.generation)return;this.speaking=false;this.voiceSettled=true;this.error=null;this.emit();}
  }
  if(typeof module!=='undefined'&&module.exports)module.exports=ReplyPlayer;else root.ReplyPlayer=ReplyPlayer;
 })(typeof window==='undefined'?globalThis:window);

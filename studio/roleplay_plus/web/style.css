@@ -1,4 +1,5 @@
 :root{color-scheme:dark;--bg:#10141b;--side:#151b24;--panel:#1b2430;--panel2:#202c3a;--text:#edf3fa;--muted:#a7b6c8;--line:#344354;--accent:#e4bc7d;--accent2:#7fb7ce;--green:#73c4a6;font-family:system-ui,-apple-system,"Microsoft YaHei",sans-serif}
+.rp-confirm{max-width:min(520px,90vw);background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:14px;padding:25px}.rp-confirm::backdrop{background:#0009}.rp-confirm button{margin-right:12px}
 *{box-sizing:border-box}html,body{min-height:100%;margin:0;background:var(--bg);color:var(--text);font-size:14px}body{line-height:1.6}
 .top{min-height:72px;display:flex;align-items:center;justify-content:space-between;padding:14px 30px;background:linear-gradient(100deg,#1e2c3b,#151b24);border-bottom:1px solid var(--line);gap:20px}
 .brand{display:flex;align-items:center;gap:14px}.brand-icon{width:43px;height:43px;display:grid;place-items:center;background:#3a352d;border:1px solid #977b58;border-radius:14px;color:var(--accent);font-size:23px}

@@ -20,6 +20,7 @@ from pathlib import Path
 import re
 import shutil
 import socket
+import sys
 import sqlite3
 import subprocess
 import tempfile
@@ -33,6 +34,7 @@ import webbrowser
 from studio import backgrounds, behavior, runtime as behavior_runtime, renderers, diagnostics, model_meta
 from studio import replies
 from studio.roleplay_plus import bridge as roleplay_bridge
+from studio import gameplay,gameplay_catalog
 ROOT = Path(__file__).resolve().parent
 WEB = ROOT / "web"
 DATA = ROOT / "data"
@@ -201,6 +203,7 @@ def init():
     from .game_db import migrate
     migrate(DB_FILE)
     roleplay_bridge.initialize(DB_FILE, settings, use_existing_game_state=True)
+    gameplay_catalog.initialize(DB_FILE)
     return STATE
 
 
@@ -213,7 +216,8 @@ def chat_settings():
     """Bind existing ReplyTurn snapshot guards to profile ID AND ABA epoch."""
     session,state=game_store().snapshot()
     return dict(STATE['settings'],_game_session=session,_game_state=state,
-                _roleplay_epoch=roleplay_bridge.epoch())
+                _roleplay_epoch=roleplay_bridge.epoch(),
+                _gameplay_epoch=gameplay.Catalog(DB_FILE,asset_root() or DATA).epoch())
 
 
 def select_game_profile(profile_id):
@@ -686,6 +690,7 @@ def stream_chat(user_text,request_id,segmented=True):
     job={"id":request_id,"cancel":threading.Event()}
     with CHAT_LOCK:
         settings=chat_settings()
+        game_store().cancel_events()
         if ACTIVE_CHAT:ACTIVE_CHAT["cancel"].set()
         ACTIVE_CHAT=job
         REPLY_TURN.clear()
@@ -704,7 +709,9 @@ def stream_chat(user_text,request_id,segmented=True):
                 +behavior.llm_instructions(scenes,RUNTIME.context_hint(),segmented=segmented)
                 +(replies.instructions() if segmented else '\n请先输出 speech 字段。'))
             if settings.get("memory_enabled_for_llm",True):prompt+='\n'+memory_context(profile_id=settings['_game_session']['profile_id'])
-            prompt=roleplay_bridge.extend_prompt(prompt,settings,user_text,history(6,settings["_game_session"]["profile_id"]))
+            allowed=gameplay.candidates(sys.modules[__name__]) if asset_root() else {}
+            extra=gameplay.prompt(sys.modules[__name__],allowed) if asset_root() else ''
+            prompt=roleplay_bridge.extend_prompt(prompt,settings,user_text,history(6,settings["_game_session"]["profile_id"]),extra_context=extra,candidate_ids=list(allowed))
             messages=[{"role":"system","content":prompt}]
             messages.extend(replies.history_message(x,segmented) for x in history(12,settings['_game_session']['profile_id']) if x["role"] in ("user","assistant"))
             messages.append({"role":"user","content":user_text})
@@ -734,6 +741,9 @@ def stream_chat(user_text,request_id,segmented=True):
             app_log('llm.metrics',json.dumps(LLM_METRICS))
             result.update(source=origin,metrics=dict(LLM_METRICS))
             result.update(segments=prepared_segments,turn_id=REPLY_TURN.register(segments,settings,origin,user_text))
+            proposed=gameplay.accept_proposal(intent.get('event_proposal'),locals().get('allowed',{}))
+            REPLY_TURN.current['event_proposal']=proposed
+            result['event_pending']=bool(proposed)
         yield {"type":"final","result":result}
     finally:
         job["cancel"].set()
@@ -948,10 +958,11 @@ class Handler(BaseHTTPRequestHandler):
         path=route.path
         query=urllib.parse.parse_qs(route.query)
         try:
+            if gameplay.try_get(self,path,query):return
             if roleplay_bridge.try_get(self,path,query):return
             if path=="/":
                 return self.static(WEB/"index.html","text/html; charset=utf-8")
-            if path in ("/style.css","/app.js","/frame_sequence.js","/dialogue_player.js","/chat_stream.js","/reply_player.js","/game.js","/game.css","/game_state_hud.js"):
+            if path in ("/style.css","/app.js","/frame_sequence.js","/dialogue_player.js","/chat_stream.js","/reply_player.js","/game.js","/game.css","/game_state_hud.js","/gameplay_stage.js","/touch_geometry.js"):
                 return self.static(WEB/path[1:])
             if path=="/api/game/state":
                 return self.reply(200,game_store().read())
@@ -1075,6 +1086,9 @@ class Handler(BaseHTTPRequestHandler):
             obj=json.loads(raw)
             if not isinstance(obj,dict):
                 raise ValueError("请求体必须是对象")
+            if path.startswith('/api/game/'):
+                with CHAT_LOCK,LOCK:
+                    if gameplay.try_post(self,path,obj):return
             if path.startswith('/api/roleplay/'):
                 # Serialize RP edits with generation acceptance and sentence activation.
                 with CHAT_LOCK,LOCK:
@@ -1110,7 +1124,8 @@ class Handler(BaseHTTPRequestHandler):
                 cancel_chat(str(obj.get("id","")))
                 return self.reply(200,{"ok":True})
             if path=="/api/chat_turn_cancel":
-                with CHAT_LOCK:REPLY_TURN.cancel(obj.get('turn_id'))
+                with CHAT_LOCK:
+                    REPLY_TURN.cancel(obj.get('turn_id'));game_store().cancel_events(turn_id=obj.get('turn_id',''))
                 return self.reply(200,{'ok':True})
             if path=="/api/chat_segment":
                 return self.reply(200,activate_reply(obj.get('turn_id'),obj.get('index')))

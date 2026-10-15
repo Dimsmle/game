@@ -25,6 +25,8 @@ const imgURL=ref=>{
 const clamp=(v,min,max)=>Math.min(max,Math.max(min,v));
 let settings={},manifest={layers:[],scenes:{day:"",night:""},events:[]};
 let activeRoleName="";
+let verifiedSceneImage=null;
+let characterMirror=false;
 const roleDisplayName=()=>activeRoleName||settings.role_name||"角色";
 let files=[],activeKind="images",atlasRef="",atlasImg=new Image(),crop=null,zoom=.5,rects=[];
 let selectedLayer="",mood="neutral",action="idle",scene="day",sceneSince=0;
@@ -302,7 +304,8 @@ function drawStage(t){
  paintBackground(t);
  const activeBackground=gameMode&&gameBackdrop?manifest.scenes[gameBackdrop]:(previewBackgroundRef||manifest.scenes[scene]);
  const bg=activeBackground?resourceImage(activeBackground):null;
- if(bg&&bg._ready)drawBackgroundImage(bg);
+ if(gameMode&&verifiedSceneImage)drawBackgroundImage(verifiedSceneImage);
+ else if(bg&&bg._ready)drawBackgroundImage(bg);
  const layers=[...manifest.layers].sort((a,b)=>a.z-b.z);
  if(layers.length===0)placeholder(t);
  const sway=Math.sin(t/1150)*3;
@@ -336,7 +339,7 @@ function drawStage(t){
   ctx.save();
   ctx.translate(W/2+layer.x+(isAuto?0:sway),H/2+layer.y+(isAuto?0:bob+nod));
   ctx.rotate(isAuto?0:wave);
-  ctx.scale(layer.scale,layer.scale);
+  ctx.scale(layer.scale*(isAuto&&characterMirror?-1:1),layer.scale);
   ctx.drawImage(im,r.x,r.y,sw,sh,-sw/ratio/2,-sh/ratio/2,sw/ratio,sh/ratio);
   if(selectedLayer===layer.id){
    ctx.strokeStyle="#8eebc7";ctx.lineWidth=1.7/layer.scale;
@@ -1484,7 +1487,20 @@ window.GameBridge={
  },
  warm:plan=>loadGameExpression(plan).catch(()=>null),
  async stopSpeech(){textMouthUntil=0;await $("cancelRuntime").onclick();},
+ async applyVerifiedScene(asset,loaded){
+  if(!asset){verifiedSceneImage=null;return;}
+  const item=loaded.find(x=>x.asset_id===asset.asset_id);
+  if(!item?.image)throw Error('已审背景未预加载');
+  verifiedSceneImage=item.image;
+ },
+ touchCoordinates(event){
+  const layer=manifest.layers.find(x=>['__auto_emote_character','__auto_emote_kan'].includes(x.id));
+  if(!layer||!layer.visible||activeExpression?.motion||nodRuntimeToken!==null)return null;
+  return GameplayStage.toLocal({clientX:event.clientX,clientY:event.clientY,rect:stage.getBoundingClientRect(),canvasWidth:W,canvasHeight:H,layer,mirror:characterMirror});
+ },
+ mirror(value){characterMirror=!!value;},
  location(slot){
+  verifiedSceneImage=null;
   gameBackdrop=slot;
   const available=Object.keys(manifest.scenes);
   const key=available.includes(slot)?slot:slot==="evening"&&available.includes("day")?"day":available[0];
