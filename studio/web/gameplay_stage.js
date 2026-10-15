@@ -13,7 +13,7 @@
    if(!point)return null;
    return {x:(layer.crop.x+point.x*layer.crop.w)/740,y:(layer.crop.y+point.y*layer.crop.h)/1250};
   }
-  constructor({request,preload,applyScene,onOffer=()=>{},playMedia=async()=>{}}){Object.assign(this,{request,preload,applyScene,onOffer,playMedia});this.generation=0;this.completed=new Set();this.inflight=new Set();}
+  constructor({request,preload,applyScene,onOffer=()=>{},playMedia=async()=>{},onCG=async()=>{}}){Object.assign(this,{request,preload,applyScene,onOffer,playMedia,onCG});this.generation=0;this.completed=new Set();this.inflight=new Set();}
   cancel(){++this.generation;this.onOffer(null);}
   async restore(){
    const generation=this.generation,result=await this.request('/api/game/scene/current');
@@ -25,6 +25,7 @@
    if(!turn?.turn_id||this.completed.has(turn.turn_id)||this.inflight.has(turn.turn_id))return;
    const generation=this.generation;this.inflight.add(turn.turn_id);
    try{const value=await this.request('/api/game/turn/complete',{turn_id:turn.turn_id,displayed:true,tts_finished:true});
+    if(generation!==this.generation)return;if(value.cg_action)await this.onCG(value.cg_action);
     if(generation!==this.generation)return;this.completed.add(turn.turn_id);this.onOffer(value.event);
    }finally{this.inflight.delete(turn.turn_id);}
   }

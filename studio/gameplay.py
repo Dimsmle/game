@@ -10,7 +10,7 @@ import time
 from pathlib import Path
 from .game_db import connect
 from .gameplay_catalog import Catalog
-from . import cg_sequence
+from . import cg_sequence,cg_events
 from .gameplay_core import events,locations,media,touch,clock
 from .gameplay_core.common import fingerprint_file,checked_file,identifier
 
@@ -29,7 +29,7 @@ def busy(app):
     b=binding(app)
     with connect(app.DB_FILE) as db:
         row=db.execute('SELECT * FROM game_playback WHERE profile_id=?',(b['profile_id'],)).fetchone()
-    return bool(row and row['expires']>time.time() and json.loads(row['binding_json'])=={'binding':b,'model':app.STATE['settings'].get('character_model')})
+    return bool(cg_events.active(app) or (row and row['expires']>time.time() and json.loads(row['binding_json'])=={'binding':b,'model':app.STATE['settings'].get('character_model')}))
 
 def lease_media(app,asset):
     token=secrets.token_hex(16);b=binding(app)
@@ -81,13 +81,16 @@ def complete(app,value):
     if turn['index']!=len(turn['segments'])-1 or value.get('displayed') is not True or value.get('tts_finished') is not True:
         raise ValueError('最后一句尚未显示完成或语音未结束')
     if app.RUNTIME.snapshot()['speech_active']:raise ValueError('语音仍在播放')
-    if busy(app):raise ValueError('CG 演出期间不弹出邀请')
+    current_cg=cg_events.active(app)
+    if busy(app) and not current_cg:raise ValueError('CG 演出期间不弹出邀请')
     b=binding(app)
     with connect(app.DB_FILE) as db:
         db.execute('INSERT OR IGNORE INTO game_completed_turns VALUES(?,?,?,?)',(turn['id'],b['profile_id'],json.dumps(b),time.time()))
     event=turn.get('event_proposal')
     turn['ui_complete']=True
-    return {'event':app.game_store().present_event(turn['id'],event,b) if event else None}
+    result={'event':app.game_store().present_event(turn['id'],event,b) if event and not current_cg and not turn.get('cg_decision') else None}
+    if turn.get('cg_decision'):result['cg_action']={'turn_id':turn['id'],**turn['cg_decision']}
+    return result
 
 def prepare(app,kind,payload):
     if busy(app):raise ValueError('CG 演出正在占用舞台')
@@ -216,7 +219,7 @@ def try_get(handler,path,query):
         return True
     if path=='/api/game/catalog':
         kind=query.get('kind',['locations'])[0]
-        if kind not in ('locations','media','events','touch'):raise ValueError('未知目录')
+        if kind not in ('locations','media','events','touch','cg_rules'):raise ValueError('未知目录')
         value=catalog(app).public(kind)
     elif path=='/api/game/locations':
         manual={}
@@ -228,6 +231,7 @@ def try_get(handler,path,query):
     elif path=='/api/game/diary':value={'items':app.game_store().diary()}
     elif path=='/api/game/events/active':value={'event':app.game_store().active_event()}
     elif path=='/api/game/interaction':value={'binding':binding(app),'state':app.game_store().read(),'media_busy':busy(app)}
+    elif path=='/api/game/cg/state':value={'active':cg_events.active(app),'binding':binding(app)}
     elif path=='/api/game/scene/current':
         scene=app.game_store().read()['scene']
         if scene['location_id']=='unknown':value={'scene':None}
@@ -250,6 +254,10 @@ def try_post(handler,path,value):
         cat=catalog(app)
         if path=='/api/game/catalog/scan':result=cat.scan(value.get('kind'))
         elif path=='/api/game/catalog/cg':result=cat.import_cg(value.get('group'),value.get('revision'))
+        elif path=='/api/game/catalog/cg_rules':result=cat._save('cg_rules',cg_events.validate_rules(value.get('definitions')),value.get('revision'))
+        elif path=='/api/game/catalog/configure':
+            review=dict(value.get('review') or {},verified=True)
+            result=cat.review(value.get('kind'),review,value.get('revision'))
         elif path=='/api/game/catalog/review':
             if value.get('confirm') is not True:raise ValueError('需要玩家明确确认素材审核')
             result=cat.review(value.get('kind'),value.get('review'),value.get('revision'))
@@ -315,5 +323,8 @@ def try_post(handler,path,value):
     elif path=='/api/game/media/end':
         with connect(app.DB_FILE) as db:db.execute('DELETE FROM game_playback WHERE token=?',(value.get('token'),))
         result={'ok':True}
+    elif path=='/api/game/cg/prepare':result=cg_events.prepare(app,value.get('turn_id'))
+    elif path=='/api/game/cg/apply':result=cg_events.apply(app,value.get('turn_id'),value.get('loaded'))
+    elif path=='/api/game/cg/close':result=cg_events.close(app,value.get('session_id'))
     else:return False
     handler.reply(200,result);return True

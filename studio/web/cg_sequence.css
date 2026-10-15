@@ -6,3 +6,8 @@
 .cg-note{font-size:12px;line-height:1.7;color:#aebdd1;margin:8px 0 14px}
 .cg-close{display:block;margin-left:auto}
 @media(max-width:650px){.cg-controls span{order:3;flex-basis:100%}.cg-controls button{flex:1}.cg-note{font-size:11px}}
+.cg-stage-overlay{position:absolute;inset:0;z-index:0;overflow:hidden;background:#05070b;pointer-events:none}
+.cg-stage-overlay[hidden]{display:none!important}
+.cg-stage-image{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;opacity:0}
+.game-experience .game-top{position:relative;z-index:2}
+.game-experience .game-dialogue{z-index:2}

@@ -259,5 +259,79 @@ class GameplayIntegration(unittest.TestCase):
         rows=[x for x in self.cat.get('media')['data']['assets'] if x.get('extension')=='.cgseq']
         self.assertEqual(len(rows),1);self.assertNotEqual(rows[0]['asset_id'],item['asset_id']);self.assertFalse(rows[0]['verified'])
 
+    def cg_scene(self):
+        from studio import cg_events
+        self.import_test_cg();self.review_location()
+        app.STATE['settings']['character_model']='shi_15'
+        rules=cg_events.validate_rules([dict(cg_events.DEFAULT[0],scenes=['Loc_1'],keywords=['海边','玩水','散步'])])
+        self.cat._save('cg_rules',rules,self.cat.get('cg_rules')['revision'])
+        p=self.post('/api/game/scene/prepare',{'location_id':'Loc_1','time_of_day':'day'})
+        self.post('/api/game/commit',{'prepare_token':p['prepare_token'],'loaded':True})
+
+    def cg_reply(self,action='enter',event_id='shi_beach'):
+        def service(provider,messages,cancel):
+            self.captured=messages
+            yield json.dumps({'segments':[{'speech':'我们在海边聊一会儿。','emotion':'gentle'}],
+                              'cg_event':{'action':action,'event_id':event_id}},ensure_ascii=False)
+        with patch.object(llm.OpenAICompatibleProvider,'stream',service):
+            result=list(app.stream_chat('来海边玩水吧','cg_mock_'+action))[-1]['result']
+        app.activate_reply(result['turn_id'],0)
+        return result
+
+    def test_dialogue_cg_needs_no_approval_choice_or_stat_effect(self):
+        from studio import cg_events
+        self.cg_scene();before=app.game_store().read()
+        self.assertFalse(next(x for x in self.cat.get('media')['data']['assets'] if x.get('extension')=='.cgseq')['verified'])
+        reply=self.cg_reply();command=self.post('/api/game/turn/complete',{'turn_id':reply['turn_id'],'displayed':True,'tts_finished':True})
+        self.assertIsNone(command['event']);self.assertEqual(command['cg_action']['action'],'enter')
+        prepared=self.post('/api/game/cg/prepare',{'turn_id':reply['turn_id']});self.assertEqual(prepared['media']['category'],'cg_sequence')
+        with self.assertRaises(urllib.error.HTTPError):self.post('/api/game/cg/apply',{'turn_id':reply['turn_id'],'loaded':False})
+        body={'turn_id':reply['turn_id'],'loaded':True};first=self.post('/api/game/cg/apply',body);self.assertEqual(first,self.post('/api/game/cg/apply',body))
+        self.assertTrue(cg_events.active(app)['loop']);self.assertEqual(app.game_store().read(),before)
+        self.assertEqual(app.game_store().diary(),[])
+        self.assertIn('玩水',self.captured[0]['content'])
+
+    def test_cg_dialogue_can_continue_and_exit_without_choice(self):
+        from studio import cg_events
+        self.cg_scene();reply=self.cg_reply();self.post('/api/game/turn/complete',{'turn_id':reply['turn_id'],'displayed':True,'tts_finished':True})
+        self.post('/api/game/cg/apply',{'turn_id':reply['turn_id'],'loaded':True})
+        self.assertTrue(gameplay.busy(app))
+        reply=self.cg_reply('exit');self.assertIn('"active": {"event_id": "shi_beach"',self.captured[0]['content'])
+        command=self.post('/api/game/turn/complete',{'turn_id':reply['turn_id'],'displayed':True,'tts_finished':True})
+        self.assertEqual(command['cg_action']['action'],'exit')
+        self.post('/api/game/cg/apply',{'turn_id':reply['turn_id'],'loaded':True});self.assertIsNone(cg_events.active(app));self.assertFalse(gameplay.busy(app))
+
+    def test_cg_invalid_scene_character_ids_or_effects_are_ignored(self):
+        from studio import cg_events
+        self.cg_scene();app.STATE['settings']['character_model']='kan_10'
+        self.assertEqual(cg_events.candidates(app),[]);reply=self.cg_reply();self.assertIsNone(app.REPLY_TURN.current['cg_decision'])
+        app.STATE['settings']['character_model']='shi_15';reply=self.cg_reply(event_id='arbitrary')
+        self.assertIsNone(app.REPLY_TURN.current['cg_decision'])
+        self.assertIsNone(cg_events.decision({'action':'enter','event_id':'shi_beach','stats':{'trust':5}},cg_events.candidates(app),None))
+        app.game_store().move_location(gameplay.binding(app),'unknown','unknown');self.assertEqual(cg_events.candidates(app),[])
+
+    def test_cg_unread_cancel_aba_and_cache_changes_cannot_enter(self):
+        from studio import cg_events
+        self.cg_scene();reply=self.cg_reply()
+        with self.assertRaises(urllib.error.HTTPError):self.post('/api/game/cg/apply',{'turn_id':reply['turn_id'],'loaded':True})
+        self.post('/api/game/turn/complete',{'turn_id':reply['turn_id'],'displayed':True,'tts_finished':True})
+        app.game_store().create('cg_aba','second');app.select_game_profile('cg_aba');app.select_game_profile('default')
+        with self.assertRaises(urllib.error.HTTPError):self.post('/api/game/cg/apply',{'turn_id':reply['turn_id'],'loaded':True})
+        self.assertIsNone(cg_events.active(app))
+
+    def test_bg05_mapping_both_variants_no_other_family_guesses(self):
+        from studio import cg_events
+        self.import_test_cg();folder=self.root/'assets_pfs_002/image/bg';folder.mkdir(parents=True)
+        for suffix in ('aa','ab'):Image.new('RGB',(32,20),'blue').save(folder/('bg05'+suffix+'.png'))
+        cg_events.setup_beach(app);doc=self.cat.get('locations')['data'];family=doc['families']['bg05']
+        self.assertEqual({x['location_name'] for x in family},{'海边'})
+        self.assertEqual({x['suffix']:x['time_of_day'] for x in family},{'aa':'morning','ab':'unknown'})
+        self.assertFalse(doc['families']['bg02'][0]['verified'])
+        app.STATE['settings']['character_model']='shi_15'
+        for period in ('morning','unknown'):
+            prepared=self.post('/api/game/scene/prepare',{'location_id':'bg05','time_of_day':period})
+            self.post('/api/game/commit',{'prepare_token':prepared['prepare_token'],'loaded':True})
+            self.assertTrue(cg_events.candidates(app))
+
 
 if __name__=='__main__':unittest.main()

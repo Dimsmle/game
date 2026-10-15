@@ -80,7 +80,7 @@ class ReplyTurn:
 
 def instructions():
     return ('\n本轮顶层格式以下述逐句协议为准，上述字段规则应用于每个段落：'
-        '只输出 {"segments":[...],"event_proposal":null}，不要顶层 speech；'
+        '只输出 {"segments":[...],"event_proposal":null,"cg_event":null}，不要顶层 speech；'
         '有本轮合法事件候选时才允许提供 event_proposal，不能输出效果或自创事件。'
         '每段只表达一句话、一个自然的情绪，每段都有 speech/emotion/action_tag/scene/intensity/voice_style。'
         '通常 1–3 段，最多 6 段，总文本不超过 900 字，每段不超过 400 字。'

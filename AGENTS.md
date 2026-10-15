@@ -1,5 +1,16 @@
 # AGENTS.md — Character Studio v0.14.1 P1.5
 
+## Current user override: dialogue-directed CG, no approval gate
+
+Work on main unless the user asks for another branch. Read docs/CG_DIALOGUE_EVENTS.md.
+The user removed CG approval and choice-card requirements. User-configured CG
+IDs may enter/exit from validated LLM decisions after ReplyTurn completion.
+These media-only sessions never write stat effects. Keep file integrity,
+scene/model gates, preloading, ABA/version checks and SQLite idempotency.
+bg05 is explicitly user-labeled beach; aa is morning, ab time is not known.
+Touch geometry still needs calibration, but no separate approval checkbox.
+Older approval text below and in prior reports is historical for CG sessions.
+
 ## Current development: v0.15 integrated gameplay
 
 The user has authorized P2–P5 integration on feat/v015-integrated-gameplay.

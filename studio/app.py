@@ -204,6 +204,11 @@ def init():
     migrate(DB_FILE)
     roleplay_bridge.initialize(DB_FILE, settings, use_existing_game_state=True)
     gameplay_catalog.initialize(DB_FILE)
+    from . import cg_events
+    cg_events.initialize(DB_FILE)
+    if asset_root():
+        try:cg_events.setup_beach(sys.modules[__name__])
+        except (OSError,ValueError):app_log('cg.setup','海边CG资源未就绪；可在场景与CG事件中重新导入')
     return STATE
 
 
@@ -215,7 +220,9 @@ def game_store():
 def chat_settings():
     """Bind existing ReplyTurn snapshot guards to profile ID AND ABA epoch."""
     session,state=game_store().snapshot()
-    return dict(STATE['settings'],_game_session=session,_game_state=state,
+    from . import cg_events
+    cg=cg_events.active(sys.modules[__name__])
+    return dict(STATE['settings'],_game_session=session,_game_state=state,_cg_session=cg['session_id'] if cg else None,
                 _roleplay_epoch=roleplay_bridge.epoch(),
                 _gameplay_epoch=gameplay.Catalog(DB_FILE,asset_root() or DATA).epoch())
 
@@ -595,6 +602,7 @@ def parse_reply(value):
 
 def chat_response(user_text):
     from .game_state import prompt_context
+    from . import cg_events
     with CHAT_LOCK:
         REPLY_TURN.clear()
         if ACTIVE_CHAT:ACTIVE_CHAT['cancel'].set()
@@ -685,6 +693,7 @@ def stream_chat(user_text,request_id,segmented=True):
     """Preview text streams; only a completed, current JSON reply can act/commit."""
     global ACTIVE_CHAT,LLM_METRICS
     from .llm import OpenAICompatibleProvider,Cancelled,speech_prefix
+    from . import cg_events
     from .game_state import prompt_context
     began=time.monotonic(); first=None
     job={"id":request_id,"cancel":threading.Event()}
@@ -694,6 +703,8 @@ def stream_chat(user_text,request_id,segmented=True):
         if ACTIVE_CHAT:ACTIVE_CHAT["cancel"].set()
         ACTIVE_CHAT=job
         REPLY_TURN.clear()
+        cg_allowed=cg_events.candidates(sys.modules[__name__]) if asset_root() else []
+        cg_current=cg_events.active(sys.modules[__name__])
     try:
         if settings["llm_mode"]=="demo":
             intent=replies.demo_reply(user_text,mock_reply(user_text))
@@ -710,8 +721,8 @@ def stream_chat(user_text,request_id,segmented=True):
                 +(replies.instructions() if segmented else '\n请先输出 speech 字段。'))
             if settings.get("memory_enabled_for_llm",True):prompt+='\n'+memory_context(profile_id=settings['_game_session']['profile_id'])
             allowed=gameplay.candidates(sys.modules[__name__]) if asset_root() else {}
-            extra=gameplay.prompt(sys.modules[__name__],allowed) if asset_root() else ''
-            prompt=roleplay_bridge.extend_prompt(prompt,settings,user_text,history(6,settings["_game_session"]["profile_id"]),extra_context=extra,candidate_ids=list(allowed))
+            extra=(gameplay.prompt(sys.modules[__name__],allowed)+cg_events.prompt(sys.modules[__name__],cg_allowed)) if asset_root() else ''
+            prompt=roleplay_bridge.extend_prompt(prompt,settings,user_text,history(6,settings["_game_session"]["profile_id"]),extra_context=extra,candidate_ids=list(allowed)+[x['id'] for x in cg_allowed])
             messages=[{"role":"system","content":prompt}]
             messages.extend(replies.history_message(x,segmented) for x in history(12,settings['_game_session']['profile_id']) if x["role"] in ("user","assistant"))
             messages.append({"role":"user","content":user_text})
@@ -743,6 +754,7 @@ def stream_chat(user_text,request_id,segmented=True):
             result.update(segments=prepared_segments,turn_id=REPLY_TURN.register(segments,settings,origin,user_text))
             proposed=gameplay.accept_proposal(intent.get('event_proposal'),locals().get('allowed',{}))
             REPLY_TURN.current['event_proposal']=proposed
+            REPLY_TURN.current['cg_decision']=cg_events.decision(intent.get('cg_event'),cg_allowed,cg_current)
             result['event_pending']=bool(proposed)
         yield {"type":"final","result":result}
     finally:
@@ -962,7 +974,7 @@ class Handler(BaseHTTPRequestHandler):
             if roleplay_bridge.try_get(self,path,query):return
             if path=="/":
                 return self.static(WEB/"index.html","text/html; charset=utf-8")
-            if path in ("/style.css","/app.js","/frame_sequence.js","/dialogue_player.js","/chat_stream.js","/reply_player.js","/game.js","/game.css","/game_state_hud.js","/gameplay_stage.js","/touch_geometry.js","/cg_sequence_player.js","/cg_sequence.css"):
+            if path in ("/style.css","/app.js","/frame_sequence.js","/dialogue_player.js","/chat_stream.js","/reply_player.js","/game.js","/game.css","/game_state_hud.js","/gameplay_stage.js","/touch_geometry.js","/cg_sequence_player.js","/cg_sequence.css","/cg_event_stage.js"):
                 return self.static(WEB/path[1:])
             if path=="/api/game/state":
                 return self.reply(200,game_store().read())
