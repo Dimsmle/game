@@ -1,0 +1,16 @@
+__pycache__/
+*.py[cod]
+.tmp/
+.idea/
+.venv/
+build/
+dist/
+releases/
+*.spec
+studio/data/
+character_exports/
+*.sqlite3
+*.sqlite3-*
+.env
+.env.*
+

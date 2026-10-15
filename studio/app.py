@@ -43,7 +43,7 @@ SETTINGS_FILE = DATA / "settings.json"
 MANIFEST_FILE = DATA / "manifest.json"
 DB_FILE = DATA / "history.sqlite3"
 MAX_BODY = 24 * 1024 * 1024
-APP_VERSION="0.11.0"
+APP_VERSION="0.12.0-p1"
 
 DEFAULT_SETTINGS = {
     "assets_dir":"",
@@ -188,34 +188,44 @@ def runtime_event(event,obj=None):
 
 def init():
     global STATE
+    from copy import deepcopy
     DATA.mkdir(parents=True,exist_ok=True)
     GEN.mkdir(parents=True,exist_ok=True)
     settings=dict(DEFAULT_SETTINGS)
     settings.update(read_json(SETTINGS_FILE,{}))
-    manifest=dict(DEFAULT_MANIFEST)
+    manifest=deepcopy(DEFAULT_MANIFEST)
     manifest.update(read_json(MANIFEST_FILE,{}))
     STATE={"settings":settings,"manifest":manifest}
     RUNTIME.reset(settings.get("character_model",""))
     app_log("app.init",f"version={APP_VERSION} model={settings.get('character_model','') or '(none)'}")
-    with connect_db() as db:
-        db.execute("""CREATE TABLE IF NOT EXISTS messages(
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            created_at TEXT NOT NULL,
-            role TEXT NOT NULL,
-            content TEXT NOT NULL,
-            source TEXT NOT NULL DEFAULT 'user')""")
-        db.execute("""CREATE TABLE IF NOT EXISTS memories(
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            created_at TEXT NOT NULL,
-            content TEXT NOT NULL,
-            enabled INTEGER NOT NULL DEFAULT 1)""")
-        db.commit()
+    from .game_db import migrate
+    migrate(DB_FILE)
     return STATE
+
+
+def game_store():
+    from .game_db import GameStore
+    return GameStore(DB_FILE)
+
+
+def chat_settings():
+    """Bind existing ReplyTurn snapshot guards to profile ID AND ABA epoch."""
+    session,state=game_store().snapshot()
+    return dict(STATE['settings'],_game_session=session,_game_state=state)
+
+
+def select_game_profile(profile_id):
+    with CHAT_LOCK,LOCK:
+        value=game_store().select(profile_id)
+        if ACTIVE_CHAT:ACTIVE_CHAT['cancel'].set()
+        REPLY_TURN.clear();RUNTIME.reset(STATE['settings'].get('character_model',''))
+        return value
 
 @contextmanager
 def connect_db():
     con=sqlite3.connect(DB_FILE,timeout=5)
     con.row_factory=sqlite3.Row
+    con.execute('PRAGMA foreign_keys=ON');con.execute('PRAGMA busy_timeout=5000')
     try:
         yield con
         con.commit()
@@ -225,24 +235,27 @@ def connect_db():
     finally:
         con.close()
 
-def history(limit=30):
+def history(limit=30,profile_id=None):
+    profile_id=profile_id or game_store().session()['profile_id']
     with connect_db() as db:
-        rows=db.execute("SELECT role,content,created_at,source FROM messages ORDER BY id DESC LIMIT ?",(limit,)).fetchall()
+        rows=db.execute("SELECT role,content,created_at,source FROM messages WHERE profile_id=? ORDER BY id DESC LIMIT ?",(profile_id,limit)).fetchall()
     return [dict(r) for r in reversed(rows)]
 
 def add_history(role,text,source):
+    profile_id=game_store().session()['profile_id']
     with connect_db() as db:
-        db.execute("INSERT INTO messages(created_at,role,content,source) VALUES(?,?,?,?)",
-            (datetime.now().isoformat(timespec="seconds"),role,text[:3000],source))
-        db.execute("DELETE FROM messages WHERE id NOT IN (SELECT id FROM messages ORDER BY id DESC LIMIT 200)")
+        db.execute("INSERT INTO messages(created_at,role,content,source,profile_id) VALUES(?,?,?,?,?)",
+            (datetime.now().isoformat(timespec="seconds"),role,text[:3000],source,profile_id))
+        db.execute("DELETE FROM messages WHERE profile_id=? AND id NOT IN (SELECT id FROM messages WHERE profile_id=? ORDER BY id DESC LIMIT 200)",(profile_id,profile_id))
         db.commit()
 
-def memories(limit=80):
+def memories(limit=80,profile_id=None):
     limit=max(1,min(100,int(limit)))
+    profile_id=profile_id or game_store().session()['profile_id']
     with connect_db() as db:
         rows=db.execute(
-            "SELECT id,created_at,content,enabled FROM memories ORDER BY id DESC LIMIT ?",
-            (limit,)).fetchall()
+            "SELECT id,created_at,content,enabled FROM memories WHERE profile_id=? ORDER BY id DESC LIMIT ?",
+            (profile_id,limit)).fetchall()
     return [dict(row) for row in reversed(rows)]
 
 def add_memory(content):
@@ -251,39 +264,42 @@ def add_memory(content):
     content=" ".join(content.strip().split())
     if not 1<=len(content)<=500:
         raise ValueError("单条长期记忆需为 1–500 字")
+    profile_id=game_store().session()['profile_id']
     with connect_db() as db:
-        count=db.execute("SELECT COUNT(*) FROM memories").fetchone()[0]
+        count=db.execute("SELECT COUNT(*) FROM memories WHERE profile_id=?",(profile_id,)).fetchone()[0]
         if count>=100:
             raise ValueError("长期记忆已达到 100 条，请先整理或删除")
         cur=db.execute(
-            "INSERT INTO memories(created_at,content,enabled) VALUES(?,?,1)",
-            (datetime.now().isoformat(timespec="seconds"),content))
+            "INSERT INTO memories(created_at,content,enabled,profile_id) VALUES(?,?,1,?)",
+            (datetime.now().isoformat(timespec="seconds"),content,profile_id))
         db.commit()
         return int(cur.lastrowid)
 
 def update_memory(memory_id,enabled=None):
     if not isinstance(memory_id,int) or isinstance(memory_id,bool) or memory_id<=0:
         raise ValueError("记忆 ID 无效")
+    profile_id=game_store().session()['profile_id']
     with connect_db() as db:
         if enabled is None:
-            row=db.execute("SELECT id FROM memories WHERE id=?",(memory_id,)).fetchone()
+            row=db.execute("SELECT id FROM memories WHERE id=? AND profile_id=?",(memory_id,profile_id)).fetchone()
             if not row:raise ValueError("记忆不存在")
         else:
-            cur=db.execute("UPDATE memories SET enabled=? WHERE id=?",
-                           (1 if enabled else 0,memory_id))
+            cur=db.execute("UPDATE memories SET enabled=? WHERE id=? AND profile_id=?",
+                           (1 if enabled else 0,memory_id,profile_id))
             if cur.rowcount!=1:raise ValueError("记忆不存在")
         db.commit()
 
 def delete_memory(memory_id):
     if not isinstance(memory_id,int) or isinstance(memory_id,bool) or memory_id<=0:
         raise ValueError("记忆 ID 无效")
+    profile_id=game_store().session()['profile_id']
     with connect_db() as db:
-        cur=db.execute("DELETE FROM memories WHERE id=?",(memory_id,))
+        cur=db.execute("DELETE FROM memories WHERE id=? AND profile_id=?",(memory_id,profile_id))
         if cur.rowcount!=1:raise ValueError("记忆不存在")
         db.commit()
 
-def memory_context(max_items=12,max_chars=1400):
-    enabled=[x for x in memories(100) if x["enabled"]]
+def memory_context(max_items=12,max_chars=1400,profile_id=None):
+    enabled=[x for x in memories(100,profile_id) if x["enabled"]]
     selected=enabled[-max_items:]
     chunks=[];used=0
     for item in selected:
@@ -446,6 +462,7 @@ def validate_api_url(url):
     return url
 
 def validate_settings(obj):
+    from .persona import MAX_PERSONA_CHARS
     if not isinstance(obj,dict):
         raise ValueError("设置数据无效")
     out=dict(STATE["settings"])
@@ -455,7 +472,7 @@ def validate_settings(obj):
         v=obj[key]
         if key in ("tts_enabled","auto_scene","memory_enabled_for_llm","stt_enabled"):
             out[key]=bool(v)
-        elif not isinstance(v,str) or len(v)>4000:
+        elif not isinstance(v,str) or len(v)>(MAX_PERSONA_CHARS if key=="persona" else 4000):
             raise ValueError("设置字段内容无效：" + key)
         else:
             out[key]=v
@@ -545,6 +562,9 @@ def planned_reply(value,activate=True):
     """Strict LLM response -> stage-compatible response + audited behavior plan."""
     scenes=[key for key,ref in STATE["manifest"].get("scenes",{}).items() if ref]
     clean=behavior.normalize_llm_reply(value,scenes)
+    # P1 has no validated choice/scene commit engine yet. Model suggestions
+    # cannot move the stage; explicit player scene controls remain available.
+    clean['scene']=''
     model_name,catalog,annotations=current_behavior_context()
     plan=behavior.resolve_behavior(clean,model_name,catalog,annotations,scenes)
     if callable(PLAN_RENDER_ADAPTER):
@@ -567,10 +587,13 @@ def parse_reply(value):
     return planned_reply(value)
 
 def chat_response(user_text):
+    from .persona import context as persona_context
+    from .game_state import prompt_context
     with CHAT_LOCK:
         REPLY_TURN.clear()
         if ACTIVE_CHAT:ACTIVE_CHAT['cancel'].set()
-    settings=STATE["settings"]
+        settings=chat_settings()
+    profile_id=settings['_game_session']['profile_id']
     if settings["llm_mode"]=="deepseek":
         result=None
         for event in stream_chat(user_text,"internal_"+str(time.monotonic_ns()),segmented=False):
@@ -581,24 +604,24 @@ def chat_response(user_text):
         result.update(behavior=first['behavior'],runtime=first['runtime'])
         return result
     if settings["llm_mode"]=="demo":
-        output=planned_reply(mock_reply(user_text))
+        intent=mock_reply(user_text)
         origin="demo"
     else:
         if not settings["llm_model"].strip():
             raise ValueError("请先在设置中填写模型名称（与代理服务中的模型 ID 一致）")
         scenes=[k for k,v in STATE["manifest"]["scenes"].items() if v]
-        mem_context=(memory_context()
+        mem_context=(memory_context(profile_id=profile_id)
                      if settings.get("memory_enabled_for_llm",True) else "")
         prompt=(
             "你是一个具有固定性格的本地虚拟角色。"
             "用中文自然对话，尽量用一至三句话。\n"
+            +persona_context(settings)
+            +prompt_context(settings['_game_state'])
             +behavior.llm_instructions(scenes,RUNTIME.context_hint())
-            +"你的名字："+settings["role_name"][:100]
-            +"。你的角色设定："+settings["persona"][:1000]
             +(("\n"+mem_context) if mem_context else "")
         )
         conversation=[{"role":"system","content":prompt}]
-        for item in history(12):
+        for item in history(12,profile_id):
             if item["role"] in ("user","assistant"):
                 conversation.append({"role":item["role"],"content":item["content"]})
         conversation.append({"role":"user","content":user_text})
@@ -611,10 +634,15 @@ def chat_response(user_text):
                 raise ValueError("模型没有返回可解析的文字")
         except (KeyError,IndexError,TypeError) as e:
             raise RuntimeError("模型返回内容缺少 choices[0].message.content") from e
-        output=planned_reply(message)
+        intent=message
         origin="openai-compatible"
-    add_history("user",user_text,"user")
-    add_history("assistant",output["speech"],origin)
+    with CHAT_LOCK,LOCK:
+        if settings!=chat_settings():raise RuntimeError('存档或设置已变化，请重新发送')
+        output=planned_reply(intent)
+        with connect_db() as db:
+            for role,text,source in (('user',user_text,'user'),('assistant',output['speech'],origin)):
+                db.execute('INSERT INTO messages(created_at,role,content,source,profile_id) VALUES(?,?,?,?,?)',
+                           (datetime.now().isoformat(),role,text,source,profile_id))
     output["source"]=origin
     return output
 
@@ -629,29 +657,33 @@ def activate_reply(token,index):
             turn=REPLY_TURN.current
             visible='\n'.join(item['speech'] for item in turn['segments'][:index+1])
             history_id=turn['history_id']
+            profile_id=turn['settings']['_game_session']['profile_id']
             with connect_db() as db:
                 if history_id is None:
-                    db.execute('INSERT INTO messages(created_at,role,content,source) VALUES(?,?,?,?)',
-                        (datetime.now().isoformat(),'user',turn['user_text'],'user'))
-                    cursor=db.execute('INSERT INTO messages(created_at,role,content,source) VALUES(?,?,?,?)',
-                        (datetime.now().isoformat(),'assistant',visible,turn['source']))
+                    db.execute('INSERT INTO messages(created_at,role,content,source,profile_id) VALUES(?,?,?,?,?)',
+                        (datetime.now().isoformat(),'user',turn['user_text'],'user',profile_id))
+                    cursor=db.execute('INSERT INTO messages(created_at,role,content,source,profile_id) VALUES(?,?,?,?,?)',
+                        (datetime.now().isoformat(),'assistant',visible,turn['source'],profile_id))
                     history_id=cursor.lastrowid
                 else:
-                    updated=db.execute('UPDATE messages SET content=? WHERE id=? AND role=?',(visible,history_id,'assistant'))
+                    updated=db.execute('UPDATE messages SET content=? WHERE id=? AND role=? AND profile_id=?',(visible,history_id,'assistant',profile_id))
                     if updated.rowcount!=1:raise ValueError('聊天记录已被清理，请开始新的对话')
                 result=planned_reply(intent)
             turn['history_id']=history_id
             return result
-        return REPLY_TURN.activate(token,index,STATE['settings'],apply_segment)
+        return REPLY_TURN.activate(token,index,chat_settings(),apply_segment)
 
 
 def stream_chat(user_text,request_id,segmented=True):
     """Preview text streams; only a completed, current JSON reply can act/commit."""
     global ACTIVE_CHAT,LLM_METRICS
     from .llm import OpenAICompatibleProvider,Cancelled,speech_prefix
-    settings=dict(STATE["settings"]); began=time.monotonic(); first=None
+    from .persona import context as persona_context
+    from .game_state import prompt_context
+    began=time.monotonic(); first=None
     job={"id":request_id,"cancel":threading.Event()}
     with CHAT_LOCK:
+        settings=chat_settings()
         if ACTIVE_CHAT:ACTIVE_CHAT["cancel"].set()
         ACTIVE_CHAT=job
         REPLY_TURN.clear()
@@ -665,12 +697,13 @@ def stream_chat(user_text,request_id,segmented=True):
             validate_api_url(settings["llm_url"])
             scenes=[k for k,v in STATE["manifest"].get("scenes",{}).items() if v]
             prompt=("你是具有固定性格的虚拟角色。用中文自然交谈，回复一到三句。"
+                +persona_context(settings)
+                +prompt_context(settings['_game_state'])
                 +behavior.llm_instructions(scenes,RUNTIME.context_hint(),segmented=segmented)
-                +(replies.instructions() if segmented else '\n请先输出 speech 字段。')
-                +"你的名字："+settings["role_name"][:100]+"；性格："+settings["persona"][:1000])
-            if settings.get("memory_enabled_for_llm",True):prompt+='\n'+memory_context()
+                +(replies.instructions() if segmented else '\n请先输出 speech 字段。'))
+            if settings.get("memory_enabled_for_llm",True):prompt+='\n'+memory_context(profile_id=settings['_game_session']['profile_id'])
             messages=[{"role":"system","content":prompt}]
-            messages.extend(replies.history_message(x,segmented) for x in history(12) if x["role"] in ("user","assistant"))
+            messages.extend(replies.history_message(x,segmented) for x in history(12,settings['_game_session']['profile_id']) if x["role"] in ("user","assistant"))
             messages.append({"role":"user","content":user_text})
             raw="";visible=""
             for piece in OpenAICompatibleProvider(settings).stream(messages,job["cancel"]):
@@ -689,7 +722,7 @@ def stream_chat(user_text,request_id,segmented=True):
         if not segmented:segments=[{**segments[0],'speech':'\n'.join(item['speech'] for item in segments)}]
         with CHAT_LOCK,LOCK:
             if job["cancel"].is_set() or ACTIVE_CHAT is not job:raise Cancelled("已停止本轮对话")
-            if settings!=STATE["settings"]:raise Cancelled("配置或角色已变化，请重新发送")
+            if settings!=chat_settings():raise Cancelled("配置、存档或角色已变化，请重新发送")
             prepared_segments=[planned_reply(item,activate=False) for item in segments]
             result=dict(prepared_segments[0])
             result['speech']='\n'.join(item['speech'] for item in segments)
@@ -914,8 +947,13 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if path=="/":
                 return self.static(WEB/"index.html","text/html; charset=utf-8")
-            if path in ("/style.css","/app.js","/frame_sequence.js","/dialogue_player.js","/chat_stream.js","/reply_player.js","/game.js","/game.css"):
+            if path in ("/style.css","/app.js","/frame_sequence.js","/dialogue_player.js","/chat_stream.js","/reply_player.js","/game.js","/game.css","/game_state_hud.js"):
                 return self.static(WEB/path[1:])
+            if path=="/api/game/state":
+                return self.reply(200,game_store().read())
+            if path=="/api/game/profiles":
+                session=game_store().session()
+                return self.reply(200,{'profiles':game_store().profiles(),'selected':session['profile_id'],'generation':session['generation']})
             if path=="/api/demo_scenes":
                 from . import dialogue
                 return self.reply(200,{"scenes":dialogue.summaries()})
@@ -954,9 +992,10 @@ class Handler(BaseHTTPRequestHandler):
                     "record":metadata["models"].get(current,{}),
                     "library":metadata})
             if path=="/api/state":
-                return self.reply(200,{"settings":STATE["settings"],
-                   "manifest":STATE["manifest"],"history":history(30),
-                   "memories":memories(80)})
+                with CHAT_LOCK:
+                    value={"settings":STATE["settings"],"manifest":STATE["manifest"],
+                           "history":history(30),"memories":memories(80)}
+                return self.reply(200,value)
             if path=="/api/assets":
                 return self.reply(200,{"items":scan_assets(),"configured":asset_root() is not None})
             if path=="/api/behavior_catalog":
@@ -1028,6 +1067,19 @@ class Handler(BaseHTTPRequestHandler):
             obj=json.loads(raw)
             if not isinstance(obj,dict):
                 raise ValueError("请求体必须是对象")
+            if path=="/api/game/profile":
+                action=obj.get('action')
+                if action=='create' and set(obj)=={'action','id','display_name'}:
+                    value=game_store().create(obj['id'],obj['display_name'])
+                elif action=='select' and set(obj)=={'action','id'}:
+                    value=select_game_profile(obj['id'])
+                else:raise ValueError('存档操作字段无效；不接受属性、路径或模型规则')
+                return self.reply(200,{'ok':True,'state':value})
+            if path=="/api/game/backup":
+                if obj:raise ValueError('备份不接受自定义路径或参数')
+                from .game_db import backup_database
+                target=backup_database(DB_FILE)
+                return self.reply(200,{'ok':True,'backup_id':target.stem})
             if path=="/api/settings":
                 with LOCK:
                     STATE["settings"]=validate_settings(obj)
@@ -1125,8 +1177,9 @@ class Handler(BaseHTTPRequestHandler):
                 with CHAT_LOCK:
                     REPLY_TURN.clear()
                     if ACTIVE_CHAT:ACTIVE_CHAT['cancel'].set()
-                with connect_db() as db:
-                    db.execute("DELETE FROM messages");db.commit()
+                    profile_id=game_store().session()['profile_id']
+                    with connect_db() as db:
+                        db.execute("DELETE FROM messages WHERE profile_id=?",(profile_id,));db.commit()
                 return self.reply(200,{"ok":True})
             if path=="/api/generate_scene":
                 return self.reply(200,generate_scene(str(obj.get("scene","")),obj.get("prompt","")))

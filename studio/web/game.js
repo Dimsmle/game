@@ -202,7 +202,7 @@
   ++chatGeneration;bridge.cancelChat();bridge.stopSpeech();chatMode=false;el("gameChatForm").hidden=true;el("gameNext").hidden=false;
   closeDialogs();director.stop();++warmGeneration;clearInterval(textTimer);currentNode=null;
   bridge.mode(game);setBusy(false);
-  if(game&&ready)openStories();
+  if(game&&ready)openChat();
  }
  el("gameNext").onclick=event=>{event.stopPropagation();advance();};
  el("gameDialogue").onclick=()=>advance();
@@ -256,7 +256,7 @@
  el("enterGame").onclick=()=>changeMode(true);
  choice.addEventListener("cancel",event=>event.preventDefault());
  document.addEventListener("keydown",event=>{
-  if(chatMode&&event.target.matches("input,textarea"))return;
+  if(event.target.closest?.('input,textarea,select,button,summary,#gameStatePanel'))return;
   if(!document.body.classList.contains("game-mode")||picker.open||menu.open||choice.open||
      !el("settingsOverlay").classList.contains("hidden"))return;
   if(event.code==="Space"||event.code==="Enter"){event.preventDefault();advance();}
@@ -267,8 +267,48 @@
   get active(){return document.body.classList.contains("game-mode")&&(!!director.scene||chatMode);},
   ready(){
    if(ready)return;ready=true;setBusy(false);el("gameNext").disabled=false;
-   if(document.body.classList.contains("game-mode"))openStories();
+   if(document.body.classList.contains("game-mode"))openChat();
   }
  };
+ const hud=typeof GameStateHUD==='undefined'?null:new GameStateHUD({
+  request,beforeSwitch:stopChat,
+  async onSwitch(){await bridge.profileChanged();await openChat();},
+  render(value){
+   if(value.error){el('gameStateStatus').textContent=value.error;return;}
+   const state=value.state;
+   const stages={acquaintance:'初识',familiar:'渐渐熟悉',close:'亲近',intimate:'很亲近',committed:'稳定亲密'};
+   const mood=state.stats.mood>25?'愉快':state.stats.mood< -25?'低落':'平和';
+   el('gameStateSummary').textContent=`${stages[state.relationship_stage]||state.relationship_stage} · 心情${mood}`;
+   el('gameStateValues').textContent=`好感 ${state.stats.affection} · 信任 ${state.stats.trust}\n心情 ${state.stats.mood} · 精力 ${state.stats.energy}\n地点：${state.scene.location_id==='unknown'?'尚未登记':state.scene.location_id} · 存档版本 ${state.revision}`;
+   const select=el('gameProfileSelect');select.replaceChildren();
+   for(const profile of value.profiles){const option=document.createElement('option');option.value=profile.id;option.textContent=profile.display_name;select.append(option);}
+   select.value=state.profile_id;
+  }
+ });
+ if(hud){
+  el('gameProfileSelect').onchange=async()=>{
+   const select=el('gameProfileSelect');select.disabled=true;
+   try{await hud.select(select.value);}catch(error){el('gameStateStatus').textContent=error.message;await hud.refresh();}
+   finally{select.disabled=false;}
+  };
+  el('gameProfileCreate').onclick=async()=>{
+   const button=el('gameProfileCreate');button.disabled=true;
+   try{
+    const id='p_'+crypto.randomUUID().replaceAll('-','');
+    await request('/api/game/profile',{action:'create',id,display_name:el('gameProfileName').value.trim()});
+    await hud.select(id);el('gameProfileName').value='';
+   }catch(error){el('gameStateStatus').textContent=error.message;}
+   finally{button.disabled=false;}
+  };
+  el('gameBackup').onclick=async()=>{
+   const button=el('gameBackup');button.disabled=true;
+   try{await request('/api/game/backup',{});el('gameStateStatus').textContent='已备份到本机用户数据的 backups 目录（包含全部存档的私人聊天）。';}
+   catch(error){el('gameStateStatus').textContent=error.message;}
+   finally{button.disabled=false;}
+  };
+  el('gameShowState').onchange=()=>{el('gameStatePanel').hidden=!el('gameShowState').checked;};
+  hud.refresh();
+  setInterval(()=>{if(!document.hidden&&document.body.classList.contains('game-mode')&&!el('gameStatePanel').hidden)hud.refresh();},10000);
+ }
  if(bridge.ready)window.gameExperience.ready();
 })();

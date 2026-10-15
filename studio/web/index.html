@@ -3,14 +3,14 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Character Studio v0.11 · 逐句情绪对话</title>
+<title>Character Studio v0.12 P1 · 自由聊天与存档状态</title>
 <link rel="stylesheet" href="/style.css">
 <link rel="stylesheet" href="/game.css">
 </head>
 <body class="game-mode">
 <header class="topbar">
   <div class="brand"><div class="logo">C<span>✦</span></div>
-    <div><strong>Character Studio</strong><small>Character Platform · Desktop v0.11</small></div></div>
+    <div><strong>Character Studio</strong><small>Character Platform · Desktop v0.12 P1</small></div></div>
   <div class="top-actions"><span id="engineBadge" class="pill">加载中</span>
     <button id="enterGame" class="btn outline">进入游戏模式</button><button id="refreshBtn" class="btn outline">刷新资源</button><button id="openSettings" class="btn">模型设置</button></div>
 </header>
@@ -263,8 +263,16 @@
   </section>
 </main>
 <section id="gameExperience" class="game-experience" aria-label="角色游戏舞台">
-  <div class="game-top"><div><span id="gameSceneTitle">午后的约定</span><small id="gamePlace">等待一段新的对话</small></div>
+  <div class="game-top"><div><span id="gameSceneTitle">和她聊一会儿</span><small id="gamePlace">自由聊天</small></div>
     <button id="gameSettings" class="game-icon" aria-label="打开游戏设置">⚙</button></div>
+  <details id="gameStatePanel" class="game-state-panel">
+    <summary id="gameStateSummary">关系与心情</summary>
+    <p id="gameStateValues">正在读取本机存档…</p>
+    <label>当前存档<select id="gameProfileSelect" aria-label="当前存档"></select></label>
+    <label>新存档名称<input id="gameProfileName" maxlength="60" placeholder="新的故事"></label>
+    <div><button id="gameProfileCreate" type="button">新建空白存档</button><button id="gameBackup" type="button">备份存档</button></div>
+    <small id="gameStateStatus">属性仅由本地规则改变；当前没有事件奖励。</small>
+  </details>
   <div id="gameCurtain" class="game-curtain"></div>
   <div id="gameLoading" class="game-loading">正在准备角色画面…</div>
   <section id="gameDialogue" class="game-dialogue" aria-label="剧情对话">
@@ -276,10 +284,12 @@
 </section>
 <dialog id="gameMenu" class="game-modal" aria-labelledby="gameMenuTitle">
   <div class="game-modal-head"><h2 id="gameMenuTitle">设置</h2><button id="closeGameMenu" class="game-icon" aria-label="关闭游戏设置">✕</button></div>
-  <div class="game-menu-actions"><button id="gameChat">自由聊天</button><button id="gameStories">体验预设对话</button><button id="gameScenes">切换场景</button><button id="gameOutfits">角色造型</button></div>
+  <div class="game-menu-actions"><button id="gameChat">自由聊天</button><button id="gameScenes">切换场景</button><button id="gameOutfits">角色造型</button></div>
+  <label class="game-setting-row"><input id="gameShowState" type="checkbox" checked>显示关系与心情状态栏</label>
   <label class="game-setting-row"><input id="gameShowEmotion" type="checkbox" checked>显示每句话的情绪标签</label>
   <div class="game-menu-actions secondary"><button id="gameConnections">连接与角色设置</button><button id="gameWorkbench">开发工作台</button></div>
-  <p class="game-subtle">当前预设对话无需 AI 或语音服务。关闭设置即可回到舞台。</p>
+  <details class="game-subtle"><summary>开发回归工具</summary><button id="gameStories">旧版预设对话测试</button></details>
+  <p class="game-subtle">自由聊天使用你已配置的 AI。没有语音模型也能正常使用。</p>
 </dialog>
 <dialog id="gamePicker" class="game-modal" aria-labelledby="gamePickerTitle">
   <div class="game-modal-head"><div><small id="gamePickerEyebrow">无声的小片段</small><h2 id="gamePickerTitle">今天，从哪一段开始？</h2></div><button id="closeGamePicker" class="game-icon" aria-label="关闭选择框">✕</button></div>
@@ -298,7 +308,7 @@
       <label>LLM 接口地址<input id="cfgLlmUrl" placeholder="http://127.0.0.1:15721/v1"></label>
       <label>LLM 模型 ID<input id="cfgLlmModel" placeholder="填写代理实际支持的模型 ID"></label>
       <label>角色名字<input id="cfgRoleName" placeholder="角色"></label>
-      <label class="wide">角色性格设定<textarea id="cfgPersona" rows="3"></textarea></label>
+      <label class="wide">完整人设（每轮随系统上下文发送，最多 12000 字）<textarea id="cfgPersona" rows="8" maxlength="12000" placeholder="填写角色身份、性格、与你的关系、说话习惯和背景；不要填写 API 密钥。"></textarea><small>保存后从下一轮生效；云端 AI 会收到这段文字，不会收到原始 Word 文件。输出格式由程序统一控制。</small></label>
       <label class="check wide"><input type="checkbox" id="cfgMemoryLLM">允许把“已启用的长期记忆”加入 LLM 请求上下文</label>
       <label class="check wide"><input type="checkbox" id="cfgTts">启用角色语音（未安装也不影响文字聊天）</label>
       <label>语音提供者<select id="cfgTtsProvider"><option value="qwen3_tts">Qwen3-TTS Base（需另外准备模型）</option><option value="gpt_sovits">GPT-SoVITS 本地服务</option><option value="system">系统本地语音（非角色声音）</option></select></label>
@@ -322,6 +332,7 @@
 <script src="/dialogue_player.js"></script>
 <script src="/chat_stream.js"></script>
 <script src="/reply_player.js"></script>
+<script src="/game_state_hud.js"></script>
 <script src="/app.js"></script>
 <script src="/game.js"></script>
 </body>

@@ -1,4 +1,19 @@
-# AGENTS.md — Character Studio v0.11
+# AGENTS.md — Character Studio v0.12 P1
+
+P0/P1 prerequisites for v0.13 are implemented. Read `docs/V0.12_P0_P1_REPORT.md`,
+`docs/GAME_STATE_SCHEMA.md` and `docs/AI_EVENT_SYSTEM.md` before further work.
+NEXT is P1.5a (CharacterCard, player Persona, six narrative presets), then P1.5b
+(Lorebook and a single PromptComposer). Neither v0.13 phase is implemented yet.
+Do not repeat P1 or jump to background/CG/touch/event execution.
+
+GameState uses the existing history.sqlite3, user_version=1, with SQLite backup
+before migration. Existing messages/memories belong to profile 'default'; all
+new queries/writes must be profile-scoped. ReplyTurn snapshots bind to persistent
+profile generation and state revision; do not drop the ABA guard. No model output
+can call GameStore.commit_effect, and there is no public stat-delta endpoint.
+AI scene suggestions are disabled pending a verified player-choice commit engine.
+Default entry is free chat; authored scenes remain in developer regression tools.
+Also run `node tests/test_game_state_hud.js` in the required JS regressions.
 
 Latest fixes: read `docs/V0.11_DIALOGUE_AND_SHI_FIXES.md`. Assets are organized
 under `characters/<code>/<model>_decompiled`; recursive discovery remains supported.

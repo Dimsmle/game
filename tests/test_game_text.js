@@ -25,7 +25,8 @@ const context={window:{GameBridge:bridge},document,DialoguePlayer:Director,Reply
 vm.runInNewContext(fs.readFileSync('studio/web/game.js','utf8'),context);
 const tick=n=>{for(let i=0;i<n;i++)for(const fn of [...timers.values()])fn();};
 (async()=>{
- await el('gameChat').onclick();
+ context.window.gameExperience.ready();await new Promise(setImmediate);
+ assert.equal(el('gameChatForm').hidden,false);assert.equal(el('gamePicker').open,false);
  el('gameChatInput').value='你好';
  const pending=el('gameChatForm').onsubmit({preventDefault(){}});
  await new Promise(setImmediate);

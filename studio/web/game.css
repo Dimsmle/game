@@ -18,6 +18,15 @@ body.game-mode{overflow:hidden;background:#161925}
 #gamePlace{font-size:12px;letter-spacing:2px;opacity:.8}
 .game-icon{pointer-events:auto;border:1px solid #e4d6c552;border-radius:50%;width:42px;height:42px;background:#1f2a3d88;color:#fff5e9;font-size:19px;display:grid;place-items:center;cursor:pointer}
 .game-icon:hover{background:#4b5c73bd}
+.game-state-panel{position:absolute;right:42px;top:82px;max-width:min(310px,calc(100vw - 40px));pointer-events:auto;background:#192639e8;border:1px solid #c6af8e50;border-radius:10px;padding:10px 15px;font-size:12px;z-index:5}
+.game-state-panel[hidden]{display:none}
+.game-state-panel summary{cursor:pointer;color:#ead0a8;line-height:1.7}
+.game-state-panel label{display:block;margin:10px 0}
+.game-state-panel input,.game-state-panel select{width:100%;box-sizing:border-box;margin-top:5px;background:#111c2e;color:#fff;border:1px solid #8092aa66;padding:7px;border-radius:5px}
+.game-state-panel button{background:#34465d;color:#fff;border:1px solid #8092aa66;padding:7px;margin:3px;border-radius:5px;cursor:pointer}
+.game-state-panel small{display:block;color:#b6c2d5;line-height:1.7;margin-top:8px}
+.game-state-panel p{white-space:pre-line;line-height:1.8}
+@media(max-width:600px){.game-state-panel{right:20px;top:78px}}
 .game-dialogue{pointer-events:auto;position:absolute;bottom:34px;left:50%;transform:translateX(-50%);width:min(1000px,calc(100% - 100px));min-height:185px;padding:24px 34px 16px;background:linear-gradient(120deg,#182436f0,#263449eb);border:1px solid #d8c3a95c;border-radius:5px;box-shadow:0 20px 80px #0d18265c;backdrop-filter:blur(14px);cursor:pointer}
 .game-dialogue:before{content:"";position:absolute;left:0;top:0;width:4px;height:100%;background:linear-gradient(#d3b98a,#a6b6ce)}
 .game-speaker{display:flex;align-items:center;gap:15px;margin-bottom:12px;font-size:17px;letter-spacing:2px;color:#f2d9af}

@@ -1445,6 +1445,12 @@ function loadGameExpression(plan){
  gameExpressionCache.set(key,promise);return promise;
 }
 window.GameBridge={
+ async profileChanged(){
+  const state=await api('/api/state');
+  $("chatMessages").replaceChildren();
+  for(const item of state.history||[])appendBubble(item.content,item.role,item.source==="demo"?"演示回复":null);
+  await refreshSystemPanel();
+ },
  get ready(){return !booting;},
  get model(){return settings.character_model;},
  get speaker(){return settings.role_name&&settings.role_name!=="角色"?settings.role_name:"她";},

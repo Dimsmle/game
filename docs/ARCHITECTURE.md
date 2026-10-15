@@ -1,5 +1,11 @@
 # Character Studio v0.11 — 架构说明
 
+v0.12 P1 增量：`game_db.py` 负责原 SQLite 的备份、user_version 迁移、档案与状态事务；
+`game_state.py` 负责强类型属性规则和紧凑可信上下文。`app.py` 仍使用原 ReplyTurn，
+仅在其 settings 快照加入档案 generation 与状态 revision，防止跨档案旧回复落地。
+聊天和记忆按 profile_id 隔离；HUD 是 read-only 属性视图，不能传 delta 改值。
+详见 `GAME_STATE_SCHEMA.md`、`AI_EVENT_SYSTEM.md`、`V0.12_P0_P1_REPORT.md`。
+
 v0.11 在流式回复与原状态机之间增加 `studio/replies.py`（白名单句子列表、内存播放令牌）与
 `web/reply_player.js`（逐句准备/展示/语音/中断）。最终回复只准备计划，不提交全部动作；
 `/api/chat_segment` 按序激活当前句并保存已推进的文本前缀。见 `V0.11_SENTENCE_REPLIES.md`。

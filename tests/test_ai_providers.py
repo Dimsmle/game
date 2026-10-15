@@ -74,6 +74,25 @@ class TransportTests(unittest.TestCase):
 
 
 class PipelineTests(unittest.TestCase):
+    def test_complete_persona_in_first_and_later_system_context(self):
+        card='日常角色资料。'*230+'末尾约束：不要替用户做决定。'
+        self.assertGreater(len(card),1000)
+        app.STATE['settings'].update(app.validate_settings({'persona':card,'role_name':'测试角色'}))
+        captured=[]
+        def service(provider,messages,cancel):
+            captured.append(messages)
+            yield '{"segments":[{"speech":"你好。","emotion":"gentle"}]}'
+        with patch.object(llm.OpenAICompatibleProvider,'stream',service):
+            for index in range(2):
+                value=list(app.stream_chat('hello','persona_test_'+str(index)))[-1]['result']
+                app.activate_reply(value['turn_id'],0)
+        for messages in captured:
+            self.assertEqual(messages[0]['role'],'system')
+            self.assertIn(card,messages[0]['content'])
+            self.assertIn('测试角色',messages[0]['content'])
+            self.assertIn('JSON',messages[0]['content'])
+        with self.assertRaises(ValueError):app.validate_settings({'persona':'字'*12001})
+
     def setUp(self):
         self.tmp=tempfile.TemporaryDirectory();self.data=Path(self.tmp.name)
         self.old=(app.DATA,app.GEN,app.SETTINGS_FILE,app.MANIFEST_FILE,app.DB_FILE,app.STATE,app.RUNTIME,app.LLM_METRICS,app.REPLY_TURN)
