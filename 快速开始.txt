@@ -1,0 +1,43 @@
+Character Studio v0.7 · 快速开始
+====================================
+
+1) Windows / PyCharm 选择 Conda Python 3.11
+2) 安装：
+   python -m pip install -r requirements.txt
+
+3) 先做自检：
+   python main_desktop.py --doctor
+
+4) 跑测试：
+   python -m unittest discover -s tests -v
+
+5) 查模型：
+   python -u main_desktop.py --root "G:\开发游戏\Amakano3_AI" --list-models
+
+6) 启动：
+   python main_desktop.py --root "G:\开发游戏\Amakano3_AI" --model kan_10
+
+UI 重点：
+- 表情/动作：查看真实 PSB 预设，给动作打语义标签。
+- 背景：本地图库、昼夜、自定义场景。
+- 系统：runtime 状态、Renderer 能力、Doctor、标签导入导出、
+        服装/动作家族人工元数据。
+
+动作标签：
+  %LOCALAPPDATA%\CharacterLab\animation_tags.json
+模型元数据：
+  %LOCALAPPDATA%\CharacterLab\model_metadata.json
+聊天：
+  %LOCALAPPDATA%\CharacterLab\history.sqlite3
+
+Windows EXE：
+  python -m pip install -r requirements-build.txt
+  python build_windows.py
+
+交给 Codex 前请先阅读：
+  AGENTS.md
+  docs\CharacterStudio_总体规划及Codex实施.md
+  docs\CODEX_HANDOFF.md
+  docs\ARCHITECTURE.md
+
+当前 E-mote 仍是静态近似预览，不是原版连续动画。

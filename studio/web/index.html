@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Character Studio v0.7 · 交接前最佳版</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand"><div class="logo">C<span>✦</span></div>
+    <div><strong>Character Studio</strong><small>AMAKANO 3 · Desktop v0.7</small></div></div>
+  <div class="top-actions"><span id="engineBadge" class="pill">加载中</span>
+    <button id="refreshBtn" class="btn outline">刷新资源</button><button id="openSettings" class="btn">模型设置</button></div>
+</header>
+<main class="layout">
+  <section class="panel left">
+    <div class="panel-title"><div><h2>资源仓库</h2><p>导出素材 · 可视化编排</p></div><span id="fileCount" class="count">0</span></div>
+    <div class="pathbox"><span class="label">当前目录</span>
+      <div id="rootHint" class="path-preview">未选择</div>
+      <p>背景资源放在当前素材根目录的 assets/bg、image/bg 或用「背景」页从电脑导入。</p></div>
+    <label class="field-label" for="assetSearch">查找素材</label>
+    <input id="assetSearch" placeholder="例如 kan_0.png、json、bg" spellcheck="false">
+    <div class="tabs" id="fileTabs">
+      <button data-kind="images" class="active">图片 <span id="imageCount">0</span></button>
+      <button data-kind="json">JSON <span id="jsonCount">0</span></button>
+    </div>
+    <div class="file-list" id="fileList"><div class="empty">正在读取资源目录...</div></div>
+    <div class="sidebar-bottom">
+      <div class="section-caption">当前图集 / 图片</div><div id="selectedImageName" class="selected-name">未选择图片</div>
+      <div class="actionrow"><button id="setDay" class="btn ghost">设为白天背景</button><button id="setNight" class="btn ghost">设为夜晚背景</button></div>
+      <button id="openBackgroundLibrary" class="mini-btn full" style="margin-top:7px">打开背景图库 / 导入图片</button>
+    </div>
+  </section>
+  <section class="middle">
+    <section class="stage-panel">
+      <div class="stage-head">
+        <div><h2>角色舞台</h2><p>支持图层组合、场景切换与模拟动作</p></div>
+        <div class="chip-group">
+          <select id="stageSceneSelect" aria-label="切换已登记场景"><option value="day">白天</option><option value="night">夜晚</option></select>
+          <span id="sceneChip" class="pill">day</span><span id="moodChip" class="pill">平静</span>
+        </div>
+      </div>
+      <div class="wardrobe-toolbar">
+        <label for="characterModelSelect">角色造型 / PSB 模型</label>
+        <select id="characterModelSelect" aria-label="已解出的角色模型">
+          <option value="">正在检查已解出的模型...</option>
+        </select>
+        <button id="applyCharacterModel" class="mini-btn">加载造型</button>
+        <span id="characterModelStatus" class="muted small">只能显示本机已解出的模型；是否有服装要看具体资源。</span>
+      </div>
+      <div class="stage-wrap">
+        <canvas width="960" height="540" id="stage"></canvas>
+        <div class="stage-watermark">PREVIEW · 原版 E-mote 动画尚未复现</div>
+        <div id="stageHint" class="stage-hint">角色图片尚未加载。穿衣模型选 kan_10；在背景页绑定本地场景。</div>
+      </div>
+      <div class="stage-toolbar">
+        <span class="section-caption">动作预览</span>
+        <button data-action="idle" class="mini-btn active">待机</button>
+        <button data-action="happy" class="mini-btn">开心</button>
+        <button data-action="nod" class="mini-btn">点头</button>
+        <button data-action="wave" class="mini-btn">轻摆</button>
+        <button data-action="sleep" class="mini-btn">困倦</button>
+        <span class="spacer"></span>
+        <span class="section-caption" style="margin:0">表情</span>
+        <button data-emotion="neutral" class="mini-btn">普通</button>
+        <button data-emotion="happy" class="mini-btn">微笑</button>
+        <button data-emotion="surprised" class="mini-btn">惊讶</button>
+        <button data-emotion="sad" class="mini-btn">悲伤</button>
+        <button id="dayBtn" class="mini-btn">白天</button>
+        <button id="nightBtn" class="mini-btn">夜晚</button>
+        <button id="exportFrame" class="mini-btn">保存当前画面 PNG</button>
+      </div>
+    </section>
+    <section class="chat-panel">
+      <div class="chat-title"><div><h2>对话</h2><p>LLM → 情绪/动作标签 → 本地动画匹配 → 语音</p></div>
+        <button id="clearHistory" class="mini-btn danger">清空聊天记录</button></div>
+      <div id="chatMessages" class="messages"></div>
+      <form id="chatForm" class="chat-entry">
+        <button type="button" id="micBtn" class="mic-btn" title="本地 Whisper 语音识别（需配置）">🎙</button>
+        <input id="chatInput" placeholder="例如：晚上好，和我聊聊天吧..." autocomplete="off" maxlength="1200">
+        <button class="send-btn" id="sendBtn" type="submit">发送 ↗</button>
+      </form>
+      <div class="chat-foot"><span id="chatStatus">就绪 · 演示模式不会调用外部模型</span><span>本地运行</span></div>
+    </section>
+  </section>
+  <section class="panel right">
+    <div class="panel-title"><div><h2>工作台</h2><p>图集裁剪与动画配置</p></div><span class="tiny-icon">⌘</span></div>
+    <div class="tabs work-tabs" id="workTabs">
+      <button class="active" data-work="expressions">表情/动作</button><button data-work="backgrounds">背景</button><button data-work="atlas">图集</button><button data-work="layers">图层</button><button data-work="events">事件</button><button data-work="scene">绘图</button><button data-work="system">系统</button>
+    </div>
+    <div class="work-body" id="expressionsPanel">
+      <div class="section-caption">E-mote 原始表情与动作时间轴</div>
+      <p class="muted small">直接读取当前 kan_N 模型实际包含的预设。正常眼睛、微笑眼睛、泪水等状态按 JSON 原值匹配。动作暂为指定时间帧的静态近似采样，不代表原版骨骼/网格动画。</p>
+      <div class="expression-count" id="expressionCount">正在读取模型预设...</div>
+      <div class="background-actions">
+        <input id="expressionSearch" placeholder="输入 日文名称 / 普通 / 笑顔 / 泣く / 首かしげ" spellcheck="false">
+        <button class="mini-btn" id="reloadExpressionList">刷新</button>
+      </div>
+      <div class="expression-category">
+        <button id="expressionFaces" class="mini-btn active">面部表情</button>
+        <button id="expressionMotions" class="mini-btn">动作时间轴</button>
+      </div>
+      <select id="expressionSelect" size="12" aria-label="128套 E-mote 预设" class="expression-list"></select>
+      <div class="background-actions">
+        <button id="applyExpression" class="btn full">应用所选预设</button>
+      </div>
+      <div class="expression-frame hidden" id="expressionFrameBox">
+        <label for="expressionFrame">动作采样帧 <span id="expressionFrameValue">0</span> / <span id="expressionFrameMax">0</span></label>
+        <input id="expressionFrame" type="range" min="0" max="300" step="5" value="0">
+        <button id="sampleExpressionFrame" class="mini-btn">显示此帧</button>
+      </div>
+      <div id="expressionStatus" class="muted small">当前是 PSB 静态采样，不是原版动态网格播放。</div>
+      <div class="behavior-editor">
+        <div class="section-caption">对话行为编排 · 动作标签</div>
+        <p class="muted small">切到「动作时间轴」，选真实预设后，填写与对话语义对应的标签。AI 只会选择标签，不能指定任意 PSB 名称。标签保存在本机 animation_tags.json。</p>
+        <label class="field-label" for="behaviorTagInput">所选动作的标签（英文逗号分隔）</label>
+        <input id="behaviorTagInput" placeholder="例如 nod, agree">
+        <div class="background-actions">
+          <button id="saveBehaviorTags" class="mini-btn">保存动作标签</button>
+          <span id="behaviorTagStatus" class="muted small">默认已为 20 个已知动作添加建议标签</span>
+        </div>
+        <label class="field-label" for="behaviorEmotionSelect">自定义情绪对应的面部预设</label>
+        <div class="background-actions">
+          <select id="behaviorEmotionSelect" aria-label="情绪语义"></select>
+          <select id="behaviorExpressionTarget" aria-label="实际面部预设"></select>
+        </div>
+        <button id="saveEmotionBinding" class="mini-btn full">保存此情绪的面部预设</button>
+        <div class="section-caption" style="margin-top:14px">最近一次 AI 行为决策</div>
+        <pre id="behaviorTrace" class="behavior-trace">发送一条聊天消息后，这里会说明 AI 想表达的情绪、匹配到哪个游戏动作，以及能否播放。</pre>
+      </div>
+    </div>
+    <div class="work-body hidden" id="backgroundsPanel">
+      <div class="section-caption">背景图库 · 本地素材</div>
+      <p class="muted small">自动识别本机素材目录下的 bg/scene/background 图片；也可直接从电脑导入任意背景 PNG、JPG 或 WEBP。</p>
+      <div class="background-actions">
+        <input id="backgroundSearch" placeholder="查找地点、文件名、day/night..." spellcheck="false">
+        <button id="rescanBackgrounds" class="mini-btn">重新扫描</button>
+      </div>
+      <div class="background-actions">
+        <input id="backgroundUpload" type="file" accept=".png,.jpg,.jpeg,.webp,image/png,image/jpeg,image/webp" multiple hidden>
+        <button id="importBackgrounds" class="btn full">+ 从电脑导入背景图片</button>
+      </div>
+      <div id="backgroundCount" class="muted small">正在读取背景列表...</div>
+      <div class="background-gallery" id="backgroundGallery"></div>
+      <div class="section-caption">选中的背景</div>
+      <div id="selectedBackground" class="selected-background">尚未选中背景</div>
+      <div class="background-actions">
+        <button id="bgAssignDay" class="mini-btn">设为白天</button>
+        <button id="bgAssignEvening" class="mini-btn">设为傍晚</button>
+        <button id="bgAssignNight" class="mini-btn">设为夜晚</button>
+      </div>
+      <label class="field-label" for="backgroundSceneKey">新场景代号（仅小写英文、数字、下划线）</label>
+      <div class="background-actions">
+        <input id="backgroundSceneKey" placeholder="classroom / bedroom / street">
+        <button id="bgAssignNamed" class="mini-btn">保存为新场景</button>
+      </div>
+      <div class="background-settings">
+        <label><input type="checkbox" id="backgroundAutoTime"> 按电脑时间自动切换背景</label>
+        <label>显示方式 <select id="backgroundFit">
+          <option value="cover">铺满窗口（可能裁边）</option>
+          <option value="contain">完整显示（可能留边）</option>
+        </select></label>
+        <p class="muted small">自动时段：07:00–17:00 白天，17:00–19:00 傍晚，其余夜晚；若没有绑定傍晚则使用白天。手动切换场景后，会在下一个时段边界再次自动切换。</p>
+      </div>
+    </div>
+    <div class="work-body hidden" id="atlasPanel">
+      <div class="section-caption">当前图集 <span id="atlasLabel"></span></div>
+      <div class="atlas-actions"><label>缩放 <input type="range" id="atlasZoom" min="0.15" max="2" step="0.05" value="0.5"></label>
+        <button id="fullCrop" class="mini-btn">选取整张</button></div>
+      <div class="atlas-viewport" id="atlasViewport"><div class="atlas-empty">选择左侧 PNG 后在这里拖框裁剪，或点击“选取整张”。</div>
+        <div class="atlas-inner" id="atlasInner" hidden><img id="atlasImage" alt="PNG 图集" draggable="false"><div id="cropBox"></div></div></div>
+      <div class="crop-info" id="cropInfo">未选择裁剪区域</div>
+      <div class="section-caption">添加为角色图层</div>
+      <div class="inline-fields"><select id="layerSlot">
+        <option value="base">主体 / 立绘</option><option value="overlay">附加部件</option>
+        <option value="eyes_open">睁眼</option><option value="eyes_closed">闭眼</option>
+        <option value="mouth_open">张嘴</option><option value="mouth_closed">闭嘴</option>
+        <option value="happy">开心表情</option>
+      </select><button id="addLayer" class="btn" type="button">添加图层</button></div>
+      <div class="section-caption">JSON 结构定位</div>
+      <select id="jsonSelect"><option value="">选择结构 JSON 进行检查</option></select>
+      <button id="inspectJson" class="mini-btn full">分析 JSON 字段和疑似矩形</button>
+      <div class="diagnostic" id="jsonDiagnostics">可检测 JSON 键名和疑似精灵矩形坐标；不冒充原生 E-mote 动画解码。</div>
+      <div class="rect-list" id="rectList"></div>
+    </div>
+    <div class="work-body hidden" id="layersPanel">
+      <div class="section-caption">当前图层 <button class="mini-btn rightfloat" id="saveLayers">保存配置</button></div>
+      <div id="layerList" class="layer-list"></div>
+      <div class="section-caption">选中图层属性</div>
+      <div id="layerProps" class="props"></div>
+      <p class="muted small">提示：在舞台上拖动可移动当前图层；眨眼、说话依赖你分别配置相应眼睛/嘴巴贴图。</p>
+    </div>
+    <div class="work-body hidden" id="eventsPanel">
+      <div class="section-caption">定时切换场景</div>
+      <p class="muted small">使用电脑本地时间，每天同一事件只触发一次；聊天时延后执行。</p>
+      <div id="eventList" class="event-list"></div>
+      <div class="inline-fields"><input id="eventTime" type="time" value="21:00"><select id="eventScene"><option value="night">night</option><option value="day">day</option></select></div>
+      <input id="eventMessage" placeholder="角色事件台词（可以为空）">
+      <button id="addEvent" class="btn full">添加定时事件</button>
+      <div class="section-caption">已登记场景</div><div id="sceneBindings" class="diagnostic"></div>
+    </div>
+    <div class="work-body hidden" id="scenePanel">
+      <div class="section-caption">AI 绘图并保存到本地</div>
+      <p class="muted small">可选：需要兼容 OpenAI Images 的 API，并返回 b64_json PNG。相同模型与提示词会复用缓存。</p>
+      <label class="field-label" for="sceneId">场景代号</label><input id="sceneId" value="garden" placeholder="garden_night">
+      <label class="field-label" for="scenePrompt">绘图描述</label><textarea id="scenePrompt" rows="5" placeholder="Japanese visual novel background, quiet sakura park at night, soft lighting, no characters..."></textarea>
+      <button class="btn full" id="generateScene">生成 / 读取缓存</button>
+      <p id="generateStatus" class="muted small">首次生成可能需要时间，之后相同提示直接调用本地图片。</p>
+    </div>
+    <div class="work-body hidden" id="systemPanel">
+      <div class="section-caption">运行时状态机</div>
+      <div id="runtimeSummary" class="diagnostic">正在读取角色运行状态...</div>
+      <div class="background-actions">
+        <button id="cancelRuntime" class="mini-btn">停止当前动作/语音状态</button>
+        <button id="unlockScene" class="mini-btn">解除手动场景锁</button>
+      </div>
+      <div class="section-caption">渲染器能力</div>
+      <div id="rendererCapabilities" class="diagnostic">正在检查当前渲染后端...</div>
+      <div class="section-caption">当前模型人工元数据</div>
+      <p class="muted small">用于确认“这套模型是什么衣服/属于哪个动作家族”。编号本身不作为判断依据。</p>
+      <input id="modelDisplayName" placeholder="显示名，例如：校服 / 夏季私服">
+      <div class="background-actions">
+        <input id="modelOutfitTag" placeholder="outfit，例如 school_uniform">
+        <input id="modelPoseFamily" placeholder="pose family，例如 standing_a">
+      </div>
+      <label class="check"><input type="checkbox" id="modelVerified"> 已人工核对这套模型</label>
+      <textarea id="modelMetaNotes" rows="3" placeholder="备注：服装、动作、已知问题、与哪些模型结构相近"></textarea>
+      <button id="saveModelMetadata" class="mini-btn full">保存当前模型元数据</button>
+      <div id="modelMetadataStatus" class="muted small">尚未读取</div>
+      <div class="section-caption">本机长期记忆</div>
+      <p class="muted small">只保存你明确确认的记忆；不会自动把整段聊天写成永久记忆。停用后不再提供给 LLM，删除后从本机 SQLite 移除。</p>
+      <div class="background-actions">
+        <input id="memoryInput" maxlength="500" placeholder="例如：我喜欢被叫作…… / 我最喜欢……">
+        <button id="addMemory" class="mini-btn">保存记忆</button>
+      </div>
+      <div id="memoryList" class="memory-list"><div class="muted small">还没有读取长期记忆</div></div>
+      <div class="section-caption">动作标签备份 / 迁移</div>
+      <p class="muted small">只导出标签和表情映射，不包含游戏图片、PSB、语音或聊天记录。</p>
+      <div class="background-actions">
+        <input id="behaviorImportFile" type="file" accept=".json,application/json" hidden>
+        <button id="exportBehaviorConfig" class="mini-btn">导出标签 JSON</button>
+        <button id="importBehaviorConfig" class="mini-btn">导入并合并</button>
+      </div>
+      <div id="behaviorConfigStatus" class="muted small">导入前服务器会自动备份旧标签。</div>
+      <div class="section-caption">本机自检</div>
+      <button id="runDiagnostics" class="btn full">运行离线 Doctor</button>
+      <div id="diagnosticsPanel" class="diagnostic">不连接外部服务；只检查 Python、路径、Pillow、pywebview Python 包、FFmpeg、模型配置。</div>
+      <div class="section-caption">最近运行日志</div>
+      <button id="refreshLogs" class="mini-btn full">刷新本机 app.log</button>
+      <pre id="runtimeLogs" class="behavior-trace">日志只记录接口状态和错误摘要，不记录聊天请求正文/API Key。</pre>
+    </div>
+    <div id="toast" class="toast hidden"></div>
+  </section>
+</main>
+<div class="overlay hidden" id="settingsOverlay">
+  <div class="settings-dialog">
+    <div class="settings-head"><div><h2>本地模型与服务设置</h2><p>更改后保存；密钥使用环境变量，不保存在浏览器配置里</p></div>
+      <button id="closeSettings" class="mini-btn">关闭 ✕</button></div>
+    <div class="settings-grid">
+      <label>AI 模式<select id="cfgMode"><option value="demo">离线演示</option><option value="openai">OpenAI 兼容接口</option></select></label>
+      <label>LLM 接口地址<input id="cfgLlmUrl" placeholder="http://127.0.0.1:15721/v1"></label>
+      <label>LLM 模型 ID<input id="cfgLlmModel" placeholder="填写代理实际支持的模型 ID"></label>
+      <label>角色名字<input id="cfgRoleName" placeholder="角色"></label>
+      <label class="wide">角色性格设定<textarea id="cfgPersona" rows="3"></textarea></label>
+      <label class="check wide"><input type="checkbox" id="cfgMemoryLLM">允许把“已启用的长期记忆”加入 LLM 请求上下文</label>
+      <label class="check wide"><input type="checkbox" id="cfgTts">启用 GPT-SoVITS 语音</label>
+      <label>GPT-SoVITS API<input id="cfgTtsUrl" placeholder="http://127.0.0.1:9880/tts"></label>
+      <label>参考音频路径（在 TTS 服务器上）<input id="cfgRefAudio" placeholder="D:\Voice\reference.wav"></label>
+      <label>语音输出语言<input id="cfgTextLang" value="zh" placeholder="zh / ja"></label>
+      <label>参考语音语言<input id="cfgPromptLang" value="ja" placeholder="ja / zh"></label>
+      <label class="wide">参考语音文本<input id="cfgPromptText" placeholder="须与 reference.wav 内容对应"></label>
+      <label class="wide">faster-whisper 本地模型目录（可选）<input id="cfgAsrPath" placeholder="D:\Models\faster-whisper-large-v3"></label>
+      <label>语音识别语言<select id="cfgAsrLang"><option value="auto">自动</option><option value="zh">中文</option><option value="ja">日语</option></select></label>
+      <label>图片生成 API 地址（可选）<input id="cfgImageUrl" placeholder="https://.../v1/images/generations"></label>
+      <label>图片生成模型（可选）<input id="cfgImageModel" placeholder="支持 b64_json 的图像模型 ID"></label>
+      <label class="wide">PsbDecompile 导出文件夹<input id="cfgAssetsDir" placeholder="D:\Exports\kan_0"></label>
+    </div>
+    <div class="settings-footer"><span>LLM_API_KEY / IMAGE_API_KEY 可在环境变量中设置</span><button id="saveSettings" class="btn">保存配置</button></div>
+  </div>
+</div>
+<script src="/app.js"></script>
+</body>
+</html>
