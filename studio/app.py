@@ -207,7 +207,9 @@ def init():
     from . import cg_events
     cg_events.initialize(DB_FILE)
     if asset_root():
-        try:cg_events.setup_beach(sys.modules[__name__])
+        try:
+            cg_events.setup_beach(sys.modules[__name__])
+            cg_events.import_shi(sys.modules[__name__])
         except (OSError,ValueError):app_log('cg.setup','海边CG资源未就绪；可在场景与CG事件中重新导入')
     return STATE
 
@@ -583,7 +585,7 @@ def planned_reply(value,activate=True):
     plan=behavior.resolve_behavior(clean,model_name,catalog,annotations,scenes)
     if callable(PLAN_RENDER_ADAPTER):
         plan=PLAN_RENDER_ADAPTER(plan,catalog)
-    if activate:plan=RUNTIME.submit_plan(plan,source="ai")
+    if activate and not (isinstance(value,dict) and value.get('kind')=='narration'):plan=RUNTIME.submit_plan(plan,source="ai")
     fallback_actions={"nod":"nod","agree":"nod","wave":"wave",
                       "greet":"wave","smile":"happy","laugh":"happy",
                       "talk":"talk","sleep":"sleep"}
@@ -591,7 +593,7 @@ def planned_reply(value,activate=True):
     # a motion; cooldown/queue suppression must not secretly animate anyway.
     legacy=(fallback_actions.get(clean["action_tag"],"idle")
             if plan.get("motion") else "idle")
-    return {"speech":clean["speech"],"emotion":clean["emotion"],
+    return {"speech":clean["speech"],"kind":'narration' if isinstance(value,dict) and value.get('kind')=='narration' else 'dialogue',"emotion":clean["emotion"],
             "action_tag":clean["action_tag"],"action":legacy,
             "intensity":clean["intensity"],"scene":clean["scene"],"voice_style":clean["voice_style"],
             "behavior":plan,"runtime":plan.get("runtime",RUNTIME.snapshot())}
@@ -670,7 +672,7 @@ def activate_reply(token,index):
     with CHAT_LOCK,LOCK:
         def apply_segment(intent):
             turn=REPLY_TURN.current
-            visible='\n'.join(item['speech'] for item in turn['segments'][:index+1])
+            visible='\n'.join(('【旁白】' if item.get('kind')=='narration' else '')+item['speech'] for item in turn['segments'][:index+1])
             history_id=turn['history_id']
             profile_id=turn['settings']['_game_session']['profile_id']
             with connect_db() as db:
@@ -733,7 +735,8 @@ def stream_chat(user_text,request_id,segmented=True):
                 preview=speech_prefix(raw)
                 if preview!=visible:
                     if first is None:first=round((time.monotonic()-began)*1000)
-                    visible=preview;yield {"type":"text","text":preview}
+                    kind_match=re.search(r'"kind"\s*:\s*"(dialogue|narration)"',raw[:raw.find('"speech"')] if '"speech"' in raw else raw)
+                    visible=preview;yield {"type":"text","text":preview,'kind':kind_match.group(1) if kind_match else 'dialogue'}
         try:intent=replies.parse_reply(raw)
         except ValueError as exc:
             app_log('llm.invalid_json',json.dumps({'characters':len(raw),'position':getattr(exc,'pos',None),'empty':not bool(raw.strip())}))
@@ -755,6 +758,8 @@ def stream_chat(user_text,request_id,segmented=True):
             proposed=gameplay.accept_proposal(intent.get('event_proposal'),locals().get('allowed',{}))
             REPLY_TURN.current['event_proposal']=proposed
             REPLY_TURN.current['cg_decision']=cg_events.decision(intent.get('cg_event'),cg_allowed,cg_current)
+            result['cg_diagnostic']=cg_events.diagnostics(sys.modules[__name__],user_text,cg_allowed,intent.get('cg_event'),REPLY_TURN.current['cg_decision'])
+            app_log('cg.decision',json.dumps(result['cg_diagnostic']))
             result['event_pending']=bool(proposed)
         yield {"type":"final","result":result}
     finally:

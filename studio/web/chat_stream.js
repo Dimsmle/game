@@ -27,7 +27,7 @@
      const lines=buffer.split('\n');buffer=lines.pop();
      for(const line of lines){
       if(!line.trim())continue;const event=JSON.parse(line);
-      if(event.type==='text')onText(event.text);
+      if(event.type==='text')onText(event.text,event.kind==='narration'?'narration':'dialogue');
       else if(event.type==='final'){result=event.result;this.turnId=result.turn_id||null;}
       else if(event.type==='cancelled')return null;
       else if(event.type==='error')throw Error(event.error);

@@ -5,7 +5,12 @@
  const bridge=window.GameBridge;
  let scenarios=[],selectedStory=null,currentNode=null,textTimer=null,shown=0,typingText="";
  let warmGeneration=0,ready=false,chatMode=false,chatGeneration=0,chatBusy=false;
- let revealStream=false;
+ let revealStream=false,textKind='dialogue';
+ function paintText(text){
+  const node=el('gameText');node.classList.toggle('is-narration',textKind==='narration');
+  if(!ReplyPlayer.textParts){node.textContent=text;return;}
+  node.replaceChildren(...ReplyPlayer.textParts(text).map(part=>{const span=document.createElement('span');span.textContent=part.text;if(part.action)span.className='dialogue-action';return span;}));
+ }
  const gameplayEnabled=typeof GameplayStage!=='undefined';
  let gameplayController=null,closeGameplayMedia=null,cgEventController=null;
  const picker=el("gamePicker"),menu=el("gameMenu"),choice=el("gameChoice");
@@ -24,19 +29,20 @@
  function showText(full){
   clearInterval(textTimer);typingText=full;shown=0;el("gameText").textContent="";
   textTimer=setInterval(()=>{
-   shown=Math.min(full.length,shown+1);el("gameText").textContent=full.slice(0,shown);
-   bridge.textSpeech(shown<full.length);
+   shown=Math.min(full.length,shown+1);paintText(full.slice(0,shown));
+   bridge.textSpeech(textKind!=='narration'&&shown<full.length);
    if(shown===full.length){clearInterval(textTimer);maybeCompleteTurn();}
   },27);
  }
- function finishText(){clearInterval(textTimer);bridge.textSpeech(false);shown=typingText.length;el("gameText").textContent=typingText;maybeCompleteTurn();}
- function streamText(preview){
+ function finishText(){clearInterval(textTimer);bridge.textSpeech(false);shown=typingText.length;paintText(typingText);maybeCompleteTurn();}
+ function streamText(preview,kind='dialogue'){
+  textKind=kind;el('gameSpeaker').textContent=kind==='narration'?'旁白':bridge.speaker;
   if(!preview.startsWith(typingText)){shown=0;el("gameText").textContent="";}
   typingText=preview;
   if(revealStream){finishText();return;}
   clearInterval(textTimer);
   textTimer=setInterval(()=>{
-   if(shown<typingText.length){shown++;el("gameText").textContent=typingText.slice(0,shown);bridge.textSpeech(true);}
+   if(shown<typingText.length){shown++;paintText(typingText.slice(0,shown));bridge.textSpeech(textKind!=='narration');}
    else {clearInterval(textTimer);bridge.textSpeech(false);}
   },27);
  }
@@ -72,7 +78,7 @@
     el("gameEmotion").textContent=bridge.emotionLabel(currentNode.emotion);
     el("gameHint").textContent="无语音 · 点击对话框或按空格继续";
     el("gameNext").textContent=currentNode.choices?.length?"回应 ▷":currentNode.next?"继续 ▷":"结束这一段 ▷";
-    showText(currentNode.text);
+    textKind='dialogue';showText(currentNode.text);
    }
    if(state.choosing){
     finishText();
@@ -85,14 +91,14 @@
  });
  const replyPlayer=new ReplyPlayer({
   async prepare(turn,index,isCurrent){
-   await bridge.prepareSegment(turn.segments[index]);
+   if(turn.segments[index].kind!=='narration')await bridge.prepareSegment(turn.segments[index]);
    if(!isCurrent())return null;
    const value=await bridge.activateSegment(turn.turn_id,index);
-   if(isCurrent())await bridge.applyChat(value,isCurrent);
+   if(isCurrent()&&value.kind!=='narration')await bridge.applyChat(value,isCurrent);
    return value;
   },
   show(value,index,count){
-   el("gameSpeaker").textContent=bridge.speaker;
+   textKind=value.kind||'dialogue';el("gameSpeaker").textContent=textKind==='narration'?'旁白':bridge.speaker;
    el("gameEmotion").textContent=bridge.emotionLabel(value.emotion);
    const alreadyVisible=index===0&&el("gameText").textContent===value.speech;
    if(alreadyVisible){typingText=value.speech;finishText();}else showText(value.speech);
@@ -268,7 +274,7 @@
   el("gameText").textContent="…";el("gameEmotion").textContent="";
   el("gameHint").textContent="你："+text;
   try{
-   const result=await bridge.chat(text,preview=>{if(current())streamText(preview);});
+   const result=await bridge.chat(text,(preview,kind)=>{if(current())streamText(preview,kind);});
    if(!result||!current())return;
    await replyPlayer.start(result);
   }catch(error){if(current()){clearInterval(textTimer);bridge.textSpeech(false);el("gameText").textContent=error.message;el("gameHint").textContent="文字聊天可继续；请检查连接设置后重试";el("gameChatInput").value=text;}}
@@ -330,6 +336,7 @@
    hide(){cgView?.destroy();cgView=null;cgOverlay.hidden=true;el('gameSceneTitle').textContent='和她聊一会儿';}});
   gameplayController=new GameplayStage({request,preload,applyScene:bridge.applyVerifiedScene,
    onCG:command=>cgEventController.act(command),
+   onCGStatus(info){if(info?.keyword_matched_ids?.length&&info.status!=='accepted')el('gameHint').textContent=info.status==='model_null'?'关键词已匹配；AI本轮未决定进入CG（可继续描述要进行的活动）':'AI事件决定无效，未执行CG；详见本机日志。';},
    onOffer(event){offeredInstance=event?.instance_id||null;if(!event){offer.close();return;}title.textContent=event.title;options.replaceChildren();
     for(const option of event.choices){const button=document.createElement('button');button.textContent=option.label;button.onclick=async()=>{button.disabled=true;try{await gameplayController.transition('event',{instance_id:event.instance_id,choice_id:option.id});}catch(error){el('gameHint').textContent=error.message;button.disabled=false;}};options.append(button);}
     if(!offer.open)offer.showModal();
@@ -347,16 +354,6 @@
   const link=document.createElement('a');link.href='/gameplay/';link.textContent='场景与CG事件';link.className='btn';menu.append(link);
   const exitCG=document.createElement('button');exitCG.textContent='结束当前CG事件';exitCG.onclick=async()=>{try{await stopChat();await cgEventController.exit();menu.close();}catch(error){el('gameHint').textContent=error.message;}};menu.append(exitCG);
   setInterval(()=>{if(document.body.classList.contains('game-mode'))cgEventController.sync().catch(error=>{el('gameHint').textContent=error.message;});},4000);
-  const sample=document.createElement('button');sample.textContent='CG差分测试预览（不解锁）';sample.onclick=async()=>{
-   let lease=null;
-   try{await stopChat();const generation=gameplayController.generation,binding=(await request('/api/game/interaction')).binding;const catalog=await request('/api/game/catalog?kind=media');const item=catalog.items.find(x=>x.extension==='.cgseq'&&x.group==='ev_shi_c04');if(!item)throw Error('请先在「场景与CG事件」导入 ev_shi_c04 样例');
-    const asset={...item,category:'cg_sequence',url:item.sequence_url};const loaded=await preload(asset);
-    if(generation!==gameplayController.generation)return;
-    lease=(await request('/api/game/cg/preview',{asset_id:item.asset_id,confirm:true,binding})).media;
-    if(generation!==gameplayController.generation){await request('/api/game/media/end',{token:lease.playback_token});return;}
-    menu.close();await gameplayController.playMedia(lease,[loaded]);
-   }catch(error){el('gameHint').textContent=error.message;if(lease)await request('/api/game/media/end',{token:lease.playback_token}).catch(()=>{});}
-  };menu.append(sample);
   const mirrorLabel=document.createElement('label'),mirrorToggle=document.createElement('input');mirrorToggle.type='checkbox';mirrorToggle.onchange=()=>bridge.mirror(mirrorToggle.checked);mirrorLabel.append(mirrorToggle,document.createTextNode('水平镜像角色'));menu.append(mirrorLabel);
   const unlock=document.createElement('button');unlock.textContent='解除地点锁（允许已标记时间变体）';unlock.onclick=async()=>{try{await request('/api/game/scene/unlock',{});el('gameHint').textContent='已解除地点锁';}catch(error){el('gameHint').textContent=error.message;}};menu.append(unlock);
   setInterval(async()=>{if(!chatMode||chatBusy||menu.open||picker.open||offer.open||mediaDialog.open)return;try{const result=await request('/api/game/scene/auto',{});if(result.prepared)await gameplayController.transition('prepared',result.prepared);}catch(error){el('gameHint').textContent=error.message;}},20000);

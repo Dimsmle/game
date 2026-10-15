@@ -24,7 +24,10 @@ def history_message(row,segmented=True):
     if row['role']=='assistant':
         # SQLite keeps read text, not raw provider JSON. Preserve the protocol
         # in model context too, without inventing historical behavior labels.
-        value={'segments':[{'speech':text}]} if segmented else {'speech':text}
+        if segmented and any(line.startswith('【旁白】') for line in text.splitlines()):
+            value={'segments':[{'kind':'narration' if line.startswith('【旁白】') else 'dialogue',
+                               'speech':line.removeprefix('【旁白】')} for line in text.splitlines() if line.strip()]}
+        else:value={'segments':[{'speech':text}]} if segmented else {'speech':text}
         text=json.dumps(value,ensure_ascii=False)
     return {'role':row['role'],'content':text}
 
@@ -44,6 +47,10 @@ def normalize_segments(value,scenes):
         if len(text)>(400 if multi else 900) or total+len(entries)-1>900:
             raise ValueError('回复过长，请让模型简短回答')
         safe=behavior.normalize_llm_reply({**item,'speech':text},scenes)
+        kind=item.get('kind','dialogue')
+        if kind not in ('dialogue','narration'):raise ValueError('段落kind必须为dialogue或narration')
+        safe['kind']=kind
+        if kind=='narration':safe.update(emotion='neutral',action_tag='idle',scene='')
         clean.append(safe)
     return clean
 
@@ -82,10 +89,13 @@ def instructions():
     return ('\n本轮顶层格式以下述逐句协议为准，上述字段规则应用于每个段落：'
         '只输出 {"segments":[...],"event_proposal":null,"cg_event":null}，不要顶层 speech；'
         '有本轮合法事件候选时才允许提供 event_proposal，不能输出效果或自创事件。'
+        '每段有kind=dialogue（角色对白）或narration（场景/神态旁白），兼容旧协议仍用speech存文字。'
+        '可以穿插简短场景描写，不必全是对白，不代替玩家做决定；不强制每轮旁白。'
+        '对白可用（轻轻摇头）等括号标注人物动作；不要把环境旁白写成角色说的话。'
         '每段只表达一句话、一个自然的情绪，每段都有 speech/emotion/action_tag/scene/intensity/voice_style。'
         '通常 1–3 段，最多 6 段，总文本不超过 900 字，每段不超过 400 字。'
         '根据每句内容分别决定表情，不要每段机械重复动作；无合适动作就 idle。'
-        '流式输出时每段先写 emotion/action_tag 等标签，最后写 speech。')
+        '流式输出时每段先写kind、emotion/action_tag等标签，最后写speech。')
 
 
 def demo_reply(text,single):

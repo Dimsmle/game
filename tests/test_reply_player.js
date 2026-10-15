@@ -25,5 +25,11 @@ const tick=()=>new Promise(resolve=>setImmediate(resolve));
  assert.equal(await retry.next(),true);await tick();assert.equal(retry.index,0);assert.equal(retry.error.voice,true);
  await retry.next();await tick();assert.equal(retry.index,1); // voice error must not replay the previous sentence
  await retry.skipVoice();assert.equal(retry.snapshot().voiceSettled,true);assert.equal(retry.error,null);
+ let voiceCalls=0;
+ const narration=new ReplyPlayer({prepare:async(t,i)=>t.segments[i],show:()=>{},speak:async()=>{voiceCalls++;}});
+ await narration.start({turn_id:'narration',segments:[{kind:'narration',speech:'海风拂过。'},{speech:'（微笑）你好。'}]});
+ assert.equal(voiceCalls,0);assert.equal(narration.snapshot().voiceSettled,true);assert.equal(narration.speaking,false);
+ await narration.next();await tick();assert.equal(voiceCalls,1);
+ assert.deepEqual(ReplyPlayer.textParts('你好（微笑）<script>'),[{text:'你好',action:false},{text:'（微笑）',action:true},{text:'<script>',action:false}]);
  console.log('ReplyPlayer: ordered sentences, voice interruption, stale-load isolation, retry and optional TTS passed');
 })().catch(error=>{console.error(error);process.exitCode=1;});

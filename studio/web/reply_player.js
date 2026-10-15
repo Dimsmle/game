@@ -2,6 +2,7 @@
 (function(root){
  "use strict";
  class ReplyPlayer {
+  static textParts(text){return text.split(/([（(][^）)]*[）)]?)/g).filter(Boolean).map(text=>({text,action:/^[（(]/.test(text)}));}
   constructor({prepare,show,speak=async()=>{},stopSpeech=async()=>{},onState=()=>{}}){
    Object.assign(this,{prepare,show,speak,stopSpeech,onState});this.generation=0;this.stop();
   }
@@ -28,6 +29,7 @@
     await this.stopSpeech();if(!current())return false;
     const value=await this.prepare(turn,index,current);if(!current())return false;
     this.index=index;this.current=value;this.loading=false;this.show(value,index,turn.segments.length);this.emit();
+    if(value.kind==='narration'){this.voiceSettled=true;this.emit();return true;}
     this.speaking=true;this.emit();
     // Do not block next/new input on the duration of a voice clip.
     Promise.resolve(this.speak(value.speech)).then(voice=>{

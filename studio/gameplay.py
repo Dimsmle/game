@@ -254,6 +254,7 @@ def try_post(handler,path,value):
         cat=catalog(app)
         if path=='/api/game/catalog/scan':result=cat.scan(value.get('kind'))
         elif path=='/api/game/catalog/cg':result=cat.import_cg(value.get('group'),value.get('revision'))
+        elif path=='/api/game/catalog/cg_shi':result=cg_events.import_shi(app)
         elif path=='/api/game/catalog/cg_rules':result=cat._save('cg_rules',cg_events.validate_rules(value.get('definitions')),value.get('revision'))
         elif path=='/api/game/catalog/configure':
             review=dict(value.get('review') or {},verified=True)

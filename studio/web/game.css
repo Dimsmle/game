@@ -58,3 +58,5 @@ body.game-mode{overflow:hidden;background:#161925}
 .game-choice h2{margin:9px 0 25px;font-size:21px}
 body:not(.game-mode) .game-modal{display:none}
 @media(max-width:700px){.game-top{padding:20px}.game-dialogue{bottom:20px;width:calc(100% - 32px);padding:20px 23px 12px;min-height:210px}.game-text{font-size:16px;min-height:96px}.game-top #gameSceneTitle{font-size:17px}.game-dialogue-foot{gap:10px}.game-modal{padding:23px}}
+#gameText.is-narration{font-family:"STKaiti","KaiTi","SimSun",serif;color:#d6e1e8;letter-spacing:1px;font-weight:400}
+#gameText .dialogue-action{font-style:italic;color:#becbd5;font-size:.92em}

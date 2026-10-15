@@ -333,5 +333,43 @@ class GameplayIntegration(unittest.TestCase):
             self.post('/api/game/commit',{'prepare_token':prepared['prepare_token'],'loaded':True})
             self.assertTrue(cg_events.candidates(app))
 
+    def test_shi_drafts_all_groups_preserve_user_rules_and_idempotent_scan(self):
+        from studio import cg_events
+        self.import_test_cg()
+        for group in ('ev_shi_c08','ev_shi_h19'):
+            path=self.root/'assets_pfs_003/image/ev'/group;path.mkdir()
+            for i in range(51 if group.endswith('c08') else 1):Image.new('RGB',(8,6),'gray').save(path/f'{group}_{i:02}.png')
+        old=self.cat.get('cg_rules');rules=old['data'];rules[0]['keywords']=['自定义'];self.cat._save('cg_rules',rules,old['revision'])
+        self.post('/api/game/catalog/cg_shi',{})
+        doc=self.cat.get('cg_rules');self.assertEqual(len(doc['data']),3)
+        self.assertEqual(doc['data'][0]['keywords'],['自定义'])
+        for row in doc['data'][1:]:self.assertFalse(row['enabled']);self.assertEqual(row['title'],'');self.assertEqual(row['scenes'],[])
+        self.post('/api/game/catalog/cg_shi',{});self.assertEqual(self.cat.get('cg_rules'),doc)
+        invalid=dict(doc['data'][1],enabled=True)
+        with self.assertRaises(ValueError):cg_events.validate_rules([invalid])
+
+    def test_keyword_alone_does_not_force_and_diagnostic_distinguishes_missing_decision(self):
+        self.cg_scene()
+        def service(provider,messages,cancel):
+            self.captured=messages
+            yield json.dumps({'segments':[{'speech':'我明白了。'}],'cg_event':None})
+        with patch.object(llm.OpenAICompatibleProvider,'stream',service):result=list(app.stream_chat('海边','diagnose_cg'))[-1]['result']
+        diagnostic=result['cg_diagnostic'];self.assertEqual(diagnostic['status'],'model_null')
+        self.assertEqual(diagnostic['keyword_matched_ids'],['shi_beach'])
+        self.assertIsNone(app.REPLY_TURN.current['cg_decision'])
+        self.assertIn('不能只在台词中答应却遗漏cg_event',self.captured[0]['content'])
+        self.assertNotIn('海边',json.dumps(diagnostic,ensure_ascii=False))
+
+    def test_narration_prefix_only_history_and_no_runtime_action(self):
+        def service(provider,messages,cancel):
+            yield json.dumps({'segments':[{'kind':'narration','speech':'风吹过海面。'},{'speech':'（微笑）你好。'}]})
+        with patch.object(llm.OpenAICompatibleProvider,'stream',service):result=list(app.stream_chat('你好','narrative_turn'))[-1]['result']
+        with patch.object(app.RUNTIME,'submit_plan',wraps=app.RUNTIME.submit_plan) as submit:
+            value=app.activate_reply(result['turn_id'],0)
+            self.assertEqual(value['kind'],'narration');submit.assert_not_called()
+        self.assertEqual(app.history()[-1]['content'],'【旁白】风吹过海面。')
+        self.assertNotIn('微笑',app.history()[-1]['content'])
+        app.activate_reply(result['turn_id'],1);self.assertIn('（微笑）你好。',app.history()[-1]['content'])
+
 
 if __name__=='__main__':unittest.main()

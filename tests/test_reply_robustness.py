@@ -5,6 +5,16 @@ from tests import test_emote as synthetic
 
 
 class ReplyProtocolTests(unittest.TestCase):
+    def test_narration_and_dialogue_kinds_are_validated(self):
+        result=replies.normalize_segments({'segments':[{'speech':'风吹过海面。','kind':'narration','action_tag':'wave'},
+                                                     {'speech':'（微笑）一起走走吧。'}]},[])
+        self.assertEqual([x['kind'] for x in result],['narration','dialogue'])
+        self.assertEqual(result[0]['action_tag'],'idle')
+        history=replies.history_message({'role':'assistant','content':'【旁白】风吹过海面。\n你好。'})
+        self.assertEqual([x['kind'] for x in json.loads(history['content'])['segments']],['narration','dialogue'])
+        for kind in ('command','<script>',{},None):
+            with self.subTest(kind=kind),self.assertRaises(ValueError):replies.normalize_segments({'segments':[{'speech':'test','kind':kind}]},[])
+
     def test_fences_complete_only(self):
         raw='{"segments":[{"speech":"你好"}]}'
         self.assertEqual(replies.parse_reply('```json\n'+raw+'\n```'),json.loads(raw))

@@ -507,6 +507,14 @@ class StudioHandler(studio.Handler):
 def start_server(port=8765, root=None):
     from http.server import ThreadingHTTPServer
     root=Path(root or studio.STATE["settings"]["assets_dir"]).resolve()
+    # --root is resolved after app.init on a first launch. Seed only after the
+    # real asset directory is selected too; repeated scans preserve user rules.
+    from studio import cg_events
+    with studio.CHAT_LOCK,studio.LOCK:
+        try:
+            cg_events.setup_beach(studio)
+            cg_events.import_shi(studio)
+        except (OSError,ValueError) as exc:studio.app_log('cg.setup',type(exc).__name__+': CG目录初始化未完成，可重新扫描')
     studio.PLAN_RENDER_ADAPTER=adapt_sequence_behavior
     try:
         server=ThreadingHTTPServer(("127.0.0.1",port),StudioHandler)

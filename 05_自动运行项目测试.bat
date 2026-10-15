@@ -18,6 +18,7 @@ node tests\test_roleplay_ui.js
 node --check studio\web\gameplay_ui.js
 node --check studio\web\gameplay_stage.js
 node tests\test_gameplay_stage.js
+node tests\test_gameplay_ui.js
 node tests\test_touch_geometry.js
 node --check studio\web\cg_sequence_player.js
 node tests\test_cg_sequence_player.js

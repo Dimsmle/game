@@ -1,5 +1,11 @@
 # AGENTS.md — Character Studio v0.14.1 P1.5
 
+Latest dialogue/index work: read docs/CG_NARRATION_AND_SHI_INDEX.md.
+Keep narration kind through stream/ReplyTurn/history; no mouth/TTS/action for narration.
+CG groups are disabled drafts until user-supplied titles/conditions; never infer story.
+Run node tests/test_gameplay_ui.js too. One paid CG/narration enter check is recorded;
+do not repeat it. 19 shi entries are an index, not full playback certification.
+
 ## Current user override: dialogue-directed CG, no approval gate
 
 Work on main unless the user asks for another branch. Read docs/CG_DIALOGUE_EVENTS.md.
