@@ -10,6 +10,7 @@ import time
 from pathlib import Path
 from .game_db import connect
 from .gameplay_catalog import Catalog
+from . import cg_sequence
 from .gameplay_core import events,locations,media,touch,clock
 from .gameplay_core.common import fingerprint_file,checked_file,identifier
 
@@ -124,7 +125,8 @@ def media_fits(app,asset_id,location_id=None):
 
 def verify_media(cat,item):
     path=cat.file(item)
-    if item['category'] in ('cg_still','cg_frame'):
+    if item['category']=='cg_sequence':cg_sequence.load(cat.root,item)
+    elif item['category'] in ('cg_still','cg_frame'):
         from PIL import Image
         with Image.open(path) as im:im.verify()
     elif item['category'] not in ('bgm','se'):raise ValueError('媒体暂不支持播放')
@@ -190,10 +192,20 @@ def try_get(handler,path,query):
         handler.static(app.WEB/'gameplay.html','text/html; charset=utf-8');return True
     if path=='/gameplay/ui.js':handler.static(app.WEB/'gameplay_ui.js','text/javascript; charset=utf-8');return True
     if not path.startswith('/api/game/'):return False
+    if path.startswith('/api/game/cg/frame/'):
+        parts=path.split('/')
+        if len(parts)!=7:raise ValueError('CG帧请求无效')
+        cat=catalog(app);item=cat.item('media',parts[5])
+        if item.get('extension')!='.cgseq':raise ValueError('不是CG演出')
+        try:index=int(parts[6])
+        except ValueError:raise ValueError('CG帧编号无效') from None
+        handler.reply(200,cg_sequence.frame_bytes(cat.root,item,index),'image/png');return True
     if path.startswith('/api/game/catalog/file/'):
         parts=path.split('/')
         if len(parts)!=7 or parts[5] not in ('locations','media'):raise ValueError('素材请求无效')
         cat=catalog(app);item=cat.item(parts[5],parts[6]);file=cat.file(item)
+        if item.get('extension')=='.cgseq':
+            handler.reply(200,cg_sequence.public(cat.root,item));return True
         if file.suffix.lower() not in ('.png','.jpg','.jpeg','.webp','.wav','.ogg','.mp3'):raise ValueError('该格式仅供索引，不提供播放')
         if file.suffix.lower() in ('.png','.jpg','.jpeg','.webp'):
             from .gameplay_images import checked_image_bytes
@@ -237,6 +249,7 @@ def try_post(handler,path,value):
         if handler.headers.get('Content-Type','').split(';')[0].strip().lower()!='application/json':raise ValueError('只接受JSON')
         cat=catalog(app)
         if path=='/api/game/catalog/scan':result=cat.scan(value.get('kind'))
+        elif path=='/api/game/catalog/cg':result=cat.import_cg(value.get('group'),value.get('revision'))
         elif path=='/api/game/catalog/review':
             if value.get('confirm') is not True:raise ValueError('需要玩家明确确认素材审核')
             result=cat.review(value.get('kind'),value.get('review'),value.get('revision'))
@@ -288,6 +301,17 @@ def try_post(handler,path,value):
         if not media_fits(app,value.get('asset_id')):raise ValueError('该媒体不适用于当前角色或地点')
         cat=catalog(app);asset=media.resolve_playback(cat.get('media')['data'],value.get('asset_id'),auto=False);verify_media(cat,asset)
         result={'media':lease_media(app,asset)}
+    elif path=='/api/game/cg/preview':
+        # Explicit developer/player preview only: no story commit or unlock.
+        if value.get('confirm') is not True:raise ValueError('需要玩家明确选择CG测试预览')
+        if value.get('binding')!=binding(app):raise ValueError('预览所在存档或设定已改变')
+        unread=app.REPLY_TURN.current and not app.REPLY_TURN.current.get('ui_complete')
+        if busy(app) or app.ACTIVE_CHAT or unread or app.RUNTIME.snapshot()['speech_active']:raise ValueError('请先读完或停止对话／关闭演出')
+        cat=catalog(app);asset=cat.item('media',value.get('asset_id'))
+        if asset.get('extension')!='.cgseq':raise ValueError('仅允许预览已导入的CG差分演出')
+        cg_sequence.load(cat.root,asset)
+        asset=dict(asset,category='cg_sequence')
+        result={'media':lease_media(app,asset),'preview_only':True}
     elif path=='/api/game/media/end':
         with connect(app.DB_FILE) as db:db.execute('DELETE FROM game_playback WHERE token=?',(value.get('token'),))
         result={'ok':True}

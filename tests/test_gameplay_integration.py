@@ -209,5 +209,55 @@ class GameplayIntegration(unittest.TestCase):
         app.roleplay_bridge.store().save_card(card,0);app.roleplay_bridge.store().select(card_id='new_card')
         self.assertFalse(gameplay.media_fits(app,item['asset_id']))
 
+    def import_test_cg(self):
+        from tests.test_cg_sequence import make_group
+        make_group(self.root)
+        result=self.post('/api/game/catalog/cg',{'group':'ev_shi_c04','revision':self.cat.get('media')['revision']})
+        return next(x for x in self.cat.get('media')['data']['assets'] if x.get('extension')=='.cgseq')
+
+    def test_cg_preview_has_no_story_unlock_or_stat_effects(self):
+        item=self.import_test_cg();before=app.game_store().read()
+        public=self.get('/api/game/catalog?kind=media');entry=next(x for x in public['items'] if x['asset_id']==item['asset_id'])
+        self.assertFalse(entry['verified']);self.assertNotIn('relative_path',str(entry))
+        sequence=self.get(entry['sequence_url']);self.assertEqual(len(sequence['steps']),2)
+        with urllib.request.urlopen(self.url+sequence['frames'][1]['url']) as response:self.assertEqual(response.headers['Content-Type'],'image/png')
+        with self.assertRaises(urllib.error.HTTPError):self.post('/api/game/cg/preview',{'asset_id':item['asset_id'],'confirm':False,'binding':gameplay.binding(app)})
+        lease=self.post('/api/game/cg/preview',{'asset_id':item['asset_id'],'confirm':True,'binding':gameplay.binding(app)})
+        self.assertTrue(lease['preview_only']);self.assertTrue(gameplay.busy(app));self.assertEqual(app.game_store().read(),before)
+        self.assertEqual(self.get('/api/game/gallery')['items'],[]);self.assertEqual(app.game_store().diary(),[])
+        self.post('/api/game/media/end',{'token':lease['media']['playback_token']});self.assertFalse(gameplay.busy(app))
+
+    def test_cg_event_uses_existing_choice_transaction_after_review(self):
+        item=self.import_test_cg();rules=self.cat.get('events');rules['data'][0]['choices'][0]['effect']['media_id']=item['asset_id']
+        with self.assertRaises(ValueError):self.cat.save_events(rules['data'],rules['revision'])
+        self.cat.review('media',dict(asset_id=item['asset_id'],file_hash=item['file_hash'],category='cg_sequence',title='合成测试演出',safe_for_auto=True,verified=True),self.cat.get('media')['revision'])
+        self.cat.scan('media');self.cat.save_events(rules['data'],rules['revision']);self.enable()
+        event=self.finish(self.generate());p=self.post('/api/game/event/prepare',{'instance_id':event['instance_id'],'choice_id':'accept'})
+        self.assertEqual(p['media']['category'],'cg_sequence')
+        self.assertEqual(self.get('/api/game/gallery')['items'],[])
+        result=self.post('/api/game/commit',{'prepare_token':p['prepare_token'],'loaded':True,'idempotency_key':'cg_choice'})
+        self.assertEqual(result['media']['category'],'cg_sequence');self.assertTrue(gameplay.busy(app));self.assertEqual(len(app.game_store().diary()),1)
+        self.assertEqual(len(self.get('/api/game/gallery')['items']),1)
+        self.post('/api/game/media/end',{'token':result['media']['playback_token']})
+
+    def test_cg_changes_and_profile_aba_reject_old_preview(self):
+        item=self.import_test_cg();binding=gameplay.binding(app)
+        app.game_store().create('cg_other','second');app.select_game_profile('cg_other');app.select_game_profile('default')
+        with self.assertRaises(urllib.error.HTTPError):self.post('/api/game/cg/preview',{'asset_id':item['asset_id'],'confirm':True,'binding':binding})
+        from studio import cg_sequence
+        doc=cg_sequence.load(self.root,item);(self.root/doc['frames'][0]['relative_path']).write_bytes(b'changed')
+        with self.assertRaises(urllib.error.HTTPError):self.post('/api/game/cg/preview',{'asset_id':item['asset_id'],'confirm':True,'binding':gameplay.binding(app)})
+        self.assertFalse(gameplay.busy(app))
+
+    def test_cg_reimport_preserves_only_unchanged_approval(self):
+        item=self.import_test_cg()
+        self.cat.review('media',dict(asset_id=item['asset_id'],file_hash=item['file_hash'],category='cg_sequence',title='合成CG',verified=True),self.cat.get('media')['revision'])
+        self.cat.import_cg('ev_shi_c04',self.cat.get('media')['revision'])
+        self.assertTrue(self.cat.item('media',item['asset_id'])['verified'])
+        Image.new('RGB',(8,6),'green').save(self.root/'assets_pfs_003/image/ev/ev_shi_c04/ev_shi_c04_01.png')
+        self.cat.import_cg('ev_shi_c04',self.cat.get('media')['revision'])
+        rows=[x for x in self.cat.get('media')['data']['assets'] if x.get('extension')=='.cgseq']
+        self.assertEqual(len(rows),1);self.assertNotEqual(rows[0]['asset_id'],item['asset_id']);self.assertFalse(rows[0]['verified'])
+
 
 if __name__=='__main__':unittest.main()

@@ -5,12 +5,15 @@
  let snapshot,items=[],revision=0,selected=null,page=0,eventRevision=0,touchRevision=0,signature=null,polygons=[],points=[],image=null;
  const roleLabel=document.createElement('label'),roleInput=document.createElement('input');roleInput.id='media-roles';roleInput.placeholder='角色卡ID，逗号分隔；留空表示通用素材';roleLabel.textContent='媒体适用角色卡';roleLabel.append(roleInput);$('review').insertBefore(roleLabel,$('save-review'));
  let activeCardId='legacy_character';
+ const importCG=document.createElement('button');importCG.textContent='导入 ev_shi_c04 差分演出样例（待审）';$('scan').after(importCG);
+ const sequencePanel=document.createElement('div');$('preview').after(sequencePanel);let sequenceView=null,reviewGeneration=0;
  const report=error=>{$('status').textContent=error instanceof Error?error.message:String(error);};
  const run=fn=>async()=>{try{await fn();}catch(error){report(error);}};
  async function settings(){snapshot=await api('/api/game/interaction');$('current').textContent=`存档 ${snapshot.binding.profile_id} · 版本 ${snapshot.binding.revision} · 地点 ${snapshot.state.scene.location_id}`;for(const key of ['proactive_events','touch_interaction'])$(key==='proactive_events'?'proactive':'touch-on').checked=snapshot.state.toggles[key];$('clock').value=snapshot.state.clock_mode;$('game-hour').value=snapshot.state.flags.clock_game_hour??12;}
  async function load(){const x=await api('/api/game/catalog?kind='+$('kind').value);items=x.items;revision=x.revision;page=0;render();}
  function render(){const search=$('filter').value.trim().toLowerCase();const all=items.filter(x=>(x.filename+' '+(x.family||'')+' '+(x.location_name||'')).toLowerCase().includes(search));const max=Math.max(0,Math.ceil(all.length/24)-1);page=Math.min(page,max);$('counts').textContent=`${all.length} 项 · 第${page+1}/${max+1}页 · ${items.filter(x=>x.verified).length}项已审核`;$('items').replaceChildren();for(const item of all.slice(page*24,page*24+24)){const button=document.createElement('button');button.className='preset-card';button.textContent=[item.filename,item.family||item.extension,item.verified?'已审':'待审核',item.location_name||item.title||'',item.time_of_day||''].join(' · ');button.onclick=()=>review(item);$('items').append(button);}}
  function review(item){
+  const generation=++reviewGeneration;sequenceView?.destroy();sequenceView=null;sequencePanel.replaceChildren();
   selected=item;$('review').hidden=false;$('review-name').textContent=item.filename+' · '+item.asset_id;
   $('verified').checked=false;$('automatic').checked=!!(item.allow_automatic||item.safe_for_auto);$('default').checked=!!item.default;
   $('title').value=item.location_name||item.title||'';$('location-id').value=item.location_id||'';$('time').value=item.time_of_day||'unknown';
@@ -18,13 +21,16 @@
   roleInput.value=(item.character_ids??[activeCardId]).join(', ');
   const background=$('kind').value==='locations';roleLabel.hidden=background;$('category').closest('label').hidden=background;
   for(const key of ['location-id','time','default'])$(key).closest('label').hidden=!background;
-  const audio=['.ogg','.mp3','.wav'].includes(item.extension);$('preview').hidden=audio||item.extension==='.psb';$('preview-audio').hidden=!audio;
+  const audio=['.ogg','.mp3','.wav'].includes(item.extension),sequence=item.extension==='.cgseq';$('preview').hidden=audio||sequence||item.extension==='.psb';$('preview-audio').hidden=!audio;
   $('preview-audio').pause();$('preview-audio').removeAttribute('src');
-  if(audio)$('preview-audio').src=item.preview_url;else if(item.extension!=='.psb')$('preview').src=item.preview_url;
+  if(audio)$('preview-audio').src=item.preview_url;else if(sequence){
+   $('category').value='cg_sequence';run(async()=>{const doc=await api(item.sequence_url);const prepared=await CGSequence.prepareSequence(doc,async frame=>{const image=new Image();image.src=frame.url;await image.decode();return image;});if(generation===reviewGeneration)sequenceView=CGSequence.createView(sequencePanel,prepared);})();
+  }else if(item.extension!=='.psb')$('preview').src=item.preview_url;
   $('review').scrollIntoView({behavior:'smooth'});
  }
  $('kind').onchange=run(load);$('reload').onclick=run(load);$('filter').oninput=()=>{page=0;render();};$('previous').onclick=()=>{page=Math.max(0,page-1);render();};$('next').onclick=()=>{page++;render();};
  $('scan').onclick=run(async()=>{report('正在只读扫描并计算哈希，原素材不会改动…');await api('/api/game/catalog/scan',{kind:$('kind').value});await load();report('扫描完成；所有新文件保持未审核。');});
+ importCG.onclick=run(async()=>{report('正在安全解析IPT并合成完整画面；不执行原脚本、不自动审核…');$('kind').value='media';await load();await api('/api/game/catalog/cg',{group:'ev_shi_c04',revision});await load();const item=items.find(x=>x.extension==='.cgseq'&&x.group==='ev_shi_c04');if(item)review(item);report('样例已导入。可以逐步预览；审核后才能用于正式事件。舞台设置中另有不解锁的测试预览。');});
  $('save-review').onclick=run(async()=>{if(!selected||!$('verified').checked)throw Error('请先查看素材并勾选人工确认');const kind=$('kind').value;const review={asset_id:selected.asset_id,file_hash:selected.file_hash,verified:true};if(kind==='locations')Object.assign(review,{location_id:$('location-id').value.trim(),location_name:$('title').value,time_of_day:$('time').value,allow_automatic:$('automatic').checked,default:$('default').checked});else Object.assign(review,{category:$('category').value,title:$('title').value,safe_for_auto:$('automatic').checked,character_ids:roleInput.value.split(/[,，]/).map(x=>x.trim()).filter(Boolean)});await api('/api/game/catalog/review',{kind,revision,review,confirm:true});await load();$('review').hidden=true;report('审核已保存。');});
  $('save-settings').onclick=run(async()=>{await api('/api/game/interaction',{binding:snapshot.binding,settings:{proactive_events:$('proactive').checked,touch_interaction:$('touch-on').checked,clock_mode:$('clock').value,game_hour:Number($('game-hour').value)}});await settings();report('当前存档互动设置已保存。');});
  $('save-events').onclick=run(async()=>{const r=await api('/api/game/catalog/events',{definitions:JSON.parse($('events').value),revision:eventRevision});eventRevision=r.revision;report('事件规则校验并保存成功。');});

@@ -45,7 +45,7 @@ SETTINGS_FILE = DATA / "settings.json"
 MANIFEST_FILE = DATA / "manifest.json"
 DB_FILE = DATA / "history.sqlite3"
 MAX_BODY = 24 * 1024 * 1024
-APP_VERSION="0.14.1-p15"
+APP_VERSION="0.15-dev"
 
 DEFAULT_SETTINGS = {
     "assets_dir":"",
@@ -962,7 +962,7 @@ class Handler(BaseHTTPRequestHandler):
             if roleplay_bridge.try_get(self,path,query):return
             if path=="/":
                 return self.static(WEB/"index.html","text/html; charset=utf-8")
-            if path in ("/style.css","/app.js","/frame_sequence.js","/dialogue_player.js","/chat_stream.js","/reply_player.js","/game.js","/game.css","/game_state_hud.js","/gameplay_stage.js","/touch_geometry.js"):
+            if path in ("/style.css","/app.js","/frame_sequence.js","/dialogue_player.js","/chat_stream.js","/reply_player.js","/game.js","/game.css","/game_state_hud.js","/gameplay_stage.js","/touch_geometry.js","/cg_sequence_player.js","/cg_sequence.css"):
                 return self.static(WEB/path[1:])
             if path=="/api/game/state":
                 return self.reply(200,game_store().read())

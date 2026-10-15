@@ -4,6 +4,8 @@
 
 The user has authorized P2–P5 integration on feat/v015-integrated-gameplay.
 Read docs/V0.15_INTEGRATION_REPORT.md and docs/API_TEST_POLICY.md first.
+CG sample progress: docs/CG_SHI_C04_POC.md. cg_sequence is manual diff scene
+playback, NOT full original animation. No auto-review/unlock on test preview.
 The older instruction below to not start P2–P5 is superseded by this request.
 Keep the existing GameStore, ReplyTurn, credentials, RP Composer and renderer.
 gameplay_core.director is a pure reference model, NOT the authoritative commit path.

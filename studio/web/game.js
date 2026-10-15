@@ -304,11 +304,18 @@
   offer.addEventListener('cancel',event=>{event.preventDefault();dismiss.click();});
   const mediaDialog=document.createElement('dialog');mediaDialog.className='game-modal';
   const mediaImage=document.createElement('img'),audio=document.createElement('audio'),mediaClose=document.createElement('button');mediaImage.style.maxWidth='100%';audio.controls=true;mediaClose.textContent='继续／关闭演出';mediaDialog.append(mediaImage,audio,mediaClose);document.body.append(mediaDialog);
+  const sequenceContainer=document.createElement('div');mediaDialog.prepend(sequenceContainer);let sequenceView=null;
+  mediaClose.className='cg-close';
+  mediaDialog.style.width='min(1120px,calc(100% - 40px))';
   const mediaCache=new Map();
   const preload=async asset=>{
    if(mediaCache.has(asset.url))return mediaCache.get(asset.url);
    let result;
-   if(['bgm','se'].includes(asset.category)){
+   if(asset.category==='cg_sequence'){
+    const doc=await request(asset.url);
+    const sequence=await CGSequence.prepareSequence(doc,async frame=>{const image=new Image();image.src=frame.url;await image.decode();return image;});
+    result={asset_id:asset.asset_id,sequence};
+   }else if(['bgm','se'].includes(asset.category)){
     const sound=new Audio();sound.preload='auto';sound.src=asset.url;
     await new Promise((resolve,reject)=>{const timer=setTimeout(()=>reject(Error('音频加载超时')),15000);sound.oncanplaythrough=()=>{clearTimeout(timer);resolve();};sound.onerror=()=>{clearTimeout(timer);reject(Error('音频无法解码'));};sound.load();});
     result={asset_id:asset.asset_id,audio:sound};
@@ -322,12 +329,25 @@
    },
    async playMedia(asset,loaded){
     const token=asset.playback_token;
-    await bridge.stopSpeech();mediaImage.hidden=['bgm','se'].includes(asset.category);audio.hidden=!mediaImage.hidden;
-    if(mediaImage.hidden){audio.src=asset.url;audio.play().catch(()=>{el('gameHint').textContent='点击音频播放按钮继续';});}else mediaImage.src=asset.url;
+    await bridge.stopSpeech();sequenceView?.destroy();sequenceView=null;
+    const isSequence=asset.category==='cg_sequence',isAudio=['bgm','se'].includes(asset.category);
+    sequenceContainer.hidden=!isSequence;mediaImage.hidden=isSequence||isAudio;audio.hidden=!isAudio;
+    if(isSequence){const prepared=loaded.find(x=>x.asset_id===asset.asset_id)?.sequence;if(!prepared)throw Error('CG演出尚未预加载');sequenceView=CGSequence.createView(sequenceContainer,prepared);}
+    else if(isAudio){audio.src=asset.url;audio.play().catch(()=>{el('gameHint').textContent='点击音频播放按钮继续';});}else mediaImage.src=asset.url;
     if(!mediaDialog.open)mediaDialog.showModal();
-    await new Promise(resolve=>{const close=async()=>{closeGameplayMedia=null;audio.pause();mediaDialog.close();try{await request('/api/game/media/end',{token});}finally{resolve();}};closeGameplayMedia=close;mediaClose.onclick=close;mediaDialog.oncancel=event=>{event.preventDefault();close();};});
+    await new Promise(resolve=>{const close=async()=>{closeGameplayMedia=null;audio.pause();sequenceView?.destroy();sequenceView=null;mediaDialog.close();try{await request('/api/game/media/end',{token});}finally{resolve();}};closeGameplayMedia=close;mediaClose.onclick=close;mediaDialog.oncancel=event=>{event.preventDefault();close();};});
    }});
   const link=document.createElement('a');link.href='/gameplay/';link.textContent='玩法与素材审核';link.className='btn';menu.append(link);
+  const sample=document.createElement('button');sample.textContent='CG差分测试预览（不解锁）';sample.onclick=async()=>{
+   let lease=null;
+   try{await stopChat();const generation=gameplayController.generation,binding=(await request('/api/game/interaction')).binding;const catalog=await request('/api/game/catalog?kind=media');const item=catalog.items.find(x=>x.extension==='.cgseq'&&x.group==='ev_shi_c04');if(!item)throw Error('请先在「玩法与素材审核」导入 ev_shi_c04 样例');
+    const asset={...item,category:'cg_sequence',url:item.sequence_url};const loaded=await preload(asset);
+    if(generation!==gameplayController.generation)return;
+    lease=(await request('/api/game/cg/preview',{asset_id:item.asset_id,confirm:true,binding})).media;
+    if(generation!==gameplayController.generation){await request('/api/game/media/end',{token:lease.playback_token});return;}
+    menu.close();await gameplayController.playMedia(lease,[loaded]);
+   }catch(error){el('gameHint').textContent=error.message;if(lease)await request('/api/game/media/end',{token:lease.playback_token}).catch(()=>{});}
+  };menu.append(sample);
   const mirrorLabel=document.createElement('label'),mirrorToggle=document.createElement('input');mirrorToggle.type='checkbox';mirrorToggle.onchange=()=>bridge.mirror(mirrorToggle.checked);mirrorLabel.append(mirrorToggle,document.createTextNode('水平镜像角色'));menu.append(mirrorLabel);
   const unlock=document.createElement('button');unlock.textContent='解除地点锁（允许已审核时间变体）';unlock.onclick=async()=>{try{await request('/api/game/scene/unlock',{});el('gameHint').textContent='已解除地点锁';}catch(error){el('gameHint').textContent=error.message;}};menu.append(unlock);
   setInterval(async()=>{if(!chatMode||chatBusy||menu.open||picker.open||offer.open||mediaDialog.open)return;try{const result=await request('/api/game/scene/auto',{});if(result.prepared)await gameplayController.transition('prepared',result.prepared);}catch(error){el('gameHint').textContent=error.message;}},20000);

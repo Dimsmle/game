@@ -40,3 +40,4 @@ label.inline-check{flex-direction:row;align-items:center;font-size:13px;gap:10px
 code{font:12px Consolas,monospace;color:#e5c28a}
 @media(max-width:1000px){.content{padding:30px 25px}.sidebar{width:210px}.stat-grid{grid-template-columns:repeat(2,1fr)}.layout-split{grid-template-columns:1fr}.preset-cards{grid-template-columns:repeat(2,1fr)}}
 @media(max-width:650px){.top{padding:12px}.shell{display:block}.sidebar{width:100%;border-right:0;border-bottom:1px solid var(--line);padding:9px;display:flex;overflow-x:auto}.sidebar-title,.sidebar-help{display:none}.nav{white-space:nowrap;width:auto;flex-shrink:0}.content{padding:24px 15px}.two-cols,.three-cols,.preset-cards{grid-template-columns:1fr}.stat-grid{grid-template-columns:repeat(2,1fr)}h1{font-size:24px}}
+.gameplay-review [hidden]{display:none!important}

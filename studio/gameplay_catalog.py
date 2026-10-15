@@ -9,6 +9,7 @@ from pathlib import Path
 import threading
 from .game_db import connect,backup_database
 from .gameplay_core import locations,media,touch,events
+from . import cg_sequence
 from .gameplay_core.common import checked_file,fingerprint_file,identifier,stable_asset_id,safe_candidates,VALID_IMAGE_EXTENSIONS
 
 EMPTY_LOC={'schema':1,'families':{},'unmatched':[],'warnings':[],'total_matched':0}
@@ -85,6 +86,14 @@ class Catalog:
             value=locations.migrate_unchanged_reviews(previous['data'],scanned)
         elif kind=='media':
             value=media.merge_unchanged_media(previous['data'],media.scan_media(self.root))
+            # Generated bundles are intentionally excluded by the raw scanner.
+            # Retain only explicitly imported, still-pinned sequences.
+            for item in previous['data']['assets']:
+                if item.get('extension')=='.cgseq':
+                    try:cg_sequence.load(self.root,item)
+                    except (OSError,ValueError,KeyError):continue
+                    value['assets'].append(deepcopy(item))
+            value['count']=len(value['assets'])
             old={x['asset_id']:x for x in previous['data']['assets'] if x['verified']}
             for x in value['assets']:
                 if x['verified'] and x['asset_id'] in old:x['character_ids']=old[x['asset_id']].get('character_ids',[])
@@ -98,6 +107,9 @@ class Catalog:
         self.file(item)  # Reject a stale scan before accepting human approval.
         if kind=='locations':value=locations.apply_reviews(previous['data'],[review])
         elif kind=='media':
+            if item.get('extension')=='.cgseq':cg_sequence.load(self.root,item)
+            elif (self.root/Path(item['relative_path']).with_suffix('.ipt')).is_file():
+                raise ValueError('这是差分小图，请先导入CG演出并审核合成结果，而非直接当作完整CG')
             roles=review.get('character_ids',[])
             if not isinstance(roles,list) or len(roles)>20:raise ValueError('适用角色卡列表无效')
             for role in roles:
@@ -133,8 +145,23 @@ class Catalog:
             entry={k:deepcopy(v) for k,v in item.items() if k!='relative_path'}
             entry['filename']=Path(item['relative_path']).name
             entry['preview_url']='/api/game/catalog/file/'+kind+'/'+item['asset_id']
+            if item.get('extension')=='.cgseq':
+                entry['sequence_url']=entry['preview_url']
+                entry['preview_url']='/api/game/cg/frame/'+item['asset_id']+'/0'
             safe.append(entry)
         return {'revision':value['revision'],'items':safe,'count':len(safe)}
+
+    def import_cg(self,group,expected):
+        previous=self.get('media')
+        if type(expected) is not int or previous['revision']!=expected:raise ValueError('媒体目录已改变，请刷新')
+        item=cg_sequence.build(self.root,group)
+        value=previous['data']
+        # Reimporting unchanged data preserves explicit reviews. Changed inputs
+        # get a new ID, with no transfer of approval or unlocks.
+        if any(x['asset_id']==item['asset_id'] for x in value['assets']):return previous
+        value['assets']=[x for x in value['assets'] if not (x.get('extension')=='.cgseq' and x.get('group')==group)]
+        value['assets'].append(item);value['count']=len(value['assets'])
+        return self._save('media',value,expected)
 
     def resolve_scene(self,location_id,time_of_day,auto=False):
         item=locations.resolve_background(self.get('locations')['data'],location_id,time_of_day,auto=auto)

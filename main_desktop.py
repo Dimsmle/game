@@ -632,7 +632,7 @@ def main():
                 thread.join()
             else:
                 webview.create_window(
-                    "Character Studio v0.14.1 P1.5",url,
+                    "Character Studio v0.15 开发版",url,
                     width=1280 if not args.studio else 1480,height=760 if not args.studio else 900,
                     min_size=(800,540) if not args.studio else (1030,670),
                     background_color="#0b101b"

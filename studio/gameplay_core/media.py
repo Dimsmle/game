@@ -7,8 +7,9 @@ from .common import (VALID_IMAGE_EXTENSIONS, bounded_text, identifier, require_k
 
 EXTENSIONS=frozenset(VALID_IMAGE_EXTENSIONS|{".wav",".ogg",".mp3",".psb"})
 IMAGE_KINDS=frozenset({"cg_still","cg_frame"})
+SEQUENCE_KINDS=frozenset({'cg_sequence'})
 AUDIO_KINDS=frozenset({"bgm","se"})
-SUPPORTED_KINDS=IMAGE_KINDS|AUDIO_KINDS
+SUPPORTED_KINDS=IMAGE_KINDS|AUDIO_KINDS|SEQUENCE_KINDS
 # PSB is discovered for auditing but must NEVER be marked playable here.
 PSB_SUFFIX=".psb"
 BLOCKED_FOLDERS={"__pycache__","character_exports","generated","fonts"}
@@ -66,6 +67,7 @@ def review_media(catalog: dict, reviews: list[dict]) -> dict:
             raise ValueError("尚未支持该媒体播放种类")
         ext=item["extension"]
         if (kind in IMAGE_KINDS and ext not in VALID_IMAGE_EXTENSIONS or
+            kind in SEQUENCE_KINDS and ext!='.cgseq' or
             kind in AUDIO_KINDS and ext not in {".wav",".ogg",".mp3"} or
             ext==PSB_SUFFIX):
             raise ValueError("文件格式与媒体类型不符或原生 PSB 尚无播放能力")
