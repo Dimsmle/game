@@ -1,8 +1,27 @@
-# Character Studio v0.7
+# Character Studio v0.11
+
+本版重点：真实聊天支持每句话独立表情，不再整轮只有一个表情。
+在“自由聊天”的离线模式输入 **演示逐句表情**，点击“下一句”即可直接验收三次情绪变化。
+这是作者预设演示，不是已经接入云端 AI 的效果。停止或重新发送会取消剩余台词。
+详见 [v0.11 说明与边界](docs/V0.11_SENTENCE_REPLIES.md)。
+
+设置 → 自由聊天可在舞台输入文字；连接设置中可选 DeepSeek 官方 API（deepseek-flash）。
+密钥仅从本机 `DEEPSEEK_API_KEY` 环境变量读取，设置后重启程序；不要发到聊天里。
+Qwen Base / GPT-SoVITS / 系统语音可选，暂不安装 Whisper 或本地 LLM。
+详见 [v0.10 AI 基础实施说明](docs/V0.10_AI_FOUNDATION.md)，含已实现、实测及未验收项目。
+
+v0.9 默认是 **只有舞台、对话框和设置入口的游戏模式**。先体验三段逐句表情的无声对话；
+分支选择、场景与造型切换都使用弹窗。详见 [v0.9 使用说明](docs/V0.9_GAME_SCENES.md)。
+开发工作台改为 `--studio` 或 `10_打开开发工作台.bat`。
+
+v0.8 新增 **CPU Bezier 点头连续预览**：49 帧、目标 24 FPS、可打断、逐帧口型/眨眼，
+验收后用于对话。详情和本机验收记录见 [v0.8 开发记录](docs/V0.8_LOCAL_RELEASE.md)。
+无需部署 AI 即可使用角色与动作预览。
 
 Windows 本地 AI 虚拟角色桌面程序。当前工程基线已经把**对话、语义表情/动作、PSB 静态近似预览、多造型、背景、TTS/ASR 接口、运行状态机和未来 Renderer 接口**整合到一个项目中。
 
-> 这不是原版 E-mote 播放器。当前 E-mote 路线只能从 PsbDecompile 的 JSON/纹理生成近似静态帧，并采样一部分动作变量。完整 mesh、mask、physics、连续动画仍未实现。
+> 默认表情仍是静态近似；`うんうん` 可使用已实现的实验 CPU 网格帧序列。
+> 完整原生 E-mote mesh/mask/physics 尚未复现。
 
 ## 先运行
 
@@ -151,6 +170,18 @@ python main_desktop.py --doctor
 
 Doctor 不会主动访问互联网、DeepSeek 或 TTS，只检查本机环境。
 
+开发者还可以对一个真实 PSB 动作执行均匀采样验收。该命令只在素材目录写入
+Character Studio 自己生成的诊断 PNG/JSON，不修改解包得到的游戏文件：
+
+```powershell
+python main_desktop.py --root "G:\开发游戏\Amakano3_AI" --model kan_10 `
+  --motion-probe "うんうん" --probe-expression "笑顔Ａ" --probe-fps 24
+```
+
+结果保存在 `character_exports/motion_probes/`。若所有采样点像素相同，命令返回 4，
+`probe.json` 会保持 `playable: false`；这通常表示动作依赖尚未实现的 mesh 变形，
+程序不会用整张 PNG 摇晃来伪装成原版连续动画。
+
 ## 目录
 
 ```text
@@ -158,6 +189,7 @@ CharacterStudio/
 ├─ main_desktop.py            # Windows 主入口
 ├─ emote_model.py             # PSB JSON 时间轴/纹理结构
 ├─ pose_renderer.py           # 当前静态近似合成
+├─ motion_probe.py            # 连续动作候选的像素变化/透明/口型验收门
 ├─ desktop.py                 # Tkinter 128 时间轴调试器
 ├─ build_windows.py           # PyInstaller 构建
 ├─ studio/

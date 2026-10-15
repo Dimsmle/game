@@ -288,8 +288,10 @@ def normalize_llm_reply(obj,valid_scenes):
     action=action if action in ACTION_TAGS else "idle"
     scene=obj.get("scene","")
     scene=scene if isinstance(scene,str) and scene in valid_scenes else ""
-    return {"speech":speech,"emotion":emotion,"action_tag":action,
-            "scene":scene,"intensity":_intensity(obj.get("intensity",0.5))}
+    voice=obj.get("voice_style","normal")
+    voice=voice if isinstance(voice,str) and voice in ("normal","soft","cheerful","calm","sad") else "normal"
+    return {"speech":speech,"emotion":emotion,"action_tag":action,"voice_style":voice,
+            "scene":scene,"intensity":_intensity(obj.get("intensity",obj.get("emotion_intensity",0.5)))}
 
 def resolve_behavior(intent,model_name,catalog,library,valid_scenes):
     """Pure selection. Never executes an action; the renderer decides feasibility."""
@@ -319,7 +321,8 @@ def llm_instructions(scene_ids,runtime_hint=''):
     places=", ".join(scene_ids) if scene_ids else "(none)"
     return (
         "只输出一个有效 JSON 对象，不要 Markdown。必须有字段 "
-        "speech（自然中文回复）, emotion, action_tag, scene, intensity。\n"
+        "speech（自然中文回复）, emotion, action_tag, scene, intensity, voice_style。\n"
+        "voice_style 只能是 normal/soft/cheerful/calm/sad；不能指定声音文件。\n"
         "emotion（你推断回复时人物面部的情绪）必须取自："+emotions+"。\n"
         "action_tag（你推断应播放的动作语义）必须取自："+actions+"。\n"
         "scene 只能是空字符串或已登记场景："+places+"。\n"

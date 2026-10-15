@@ -26,14 +26,30 @@ const clamp=(v,min,max)=>Math.min(max,Math.max(min,v));
 let settings={},manifest={layers:[],scenes:{day:"",night:""},events:[]};
 let files=[],activeKind="images",atlasRef="",atlasImg=new Image(),crop=null,zoom=.5,rects=[];
 let selectedLayer="",mood="neutral",action="idle",scene="day",sceneSince=0;
+let gameBackdrop=null;
+let gameMode=new URLSearchParams(location.search).get("mode")!=="studio";
+document.body.classList.toggle("game-mode",gameMode);
 let backgroundItems=[],selectedBgRef="",previewBackgroundRef="",lastAutoSceneSlot="";
 let timelineCatalog=[],timelineGroup="face",activeExpression=null,expressionRequest=0;
+let nodSequence=null,nodRuntimeToken=null,nodMouthUntil=0;
+const sequenceRenderer=new FrameSequenceRenderer(ref=>new Promise((resolve,reject)=>{
+ const image=new Image();image.onload=()=>resolve(image);
+ image.onerror=()=>reject(Error("动作帧加载失败"));image.src=fileURL(ref);
+}),{onEnd:sequence=>{
+ activeExpression={label:sequence.expression,refs:sequence.settled_refs};
+ if(nodRuntimeToken!==null)runtimeEvent("motion_ended",{token:nodRuntimeToken});
+ nodRuntimeToken=null;
+ $("nodStatus").textContent="点头播放完成，已恢复同一表情。";
+}});
 let behaviorCatalog={entries:[],emotions:[],action_tags:[]};
 let memoryItems=[];
 let runtimeState={phase:"idle",emotion:"neutral",action_tag:"idle",queue_length:0,cooldowns:{},scene_lock:{active:false}};
 let runtimeActionToken=0;
+let booting=true;
 let imageCache=new Map(),busy=false,queue=[],playing=false,volume=.15,audioSource=null,audioContext=null,analyser=null,fft=null;
 let currentAudio=null,recording=false,recorder=null,recorded=[],recordingStream=null;
+let speechGeneration=0,speechFetch=null,speechQueue=Promise.resolve(),systemSpeechFinish=null;
+const chatStream=new ChatStream((...args)=>fetch(...args));
 let atlasDrag=null,stageDrag=false,toastTimer=null,assetSearchTimer=null;
 const stage=$("stage"),ctx=stage.getContext("2d");
 const W=stage.width,H=stage.height;
@@ -52,7 +68,7 @@ function toast(msg){
 }
 function setStatus(msg){$("chatStatus").textContent=msg;}
 function setEngine(){
-  const demo=settings.llm_mode!=="openai";
+  const demo=settings.llm_mode==="demo";
   $("engineBadge").textContent=demo?"离线演示 · 未连 AI":"LLM · 已配置接口";
   $("engineBadge").style.color=demo?"#b9cae3":"#8fe2c6";
 }
@@ -224,11 +240,12 @@ $("saveLayers").onclick=async()=>{await saveManifest();toast("图层和舞台配
 
 function paintBackground(t){
  const grad=ctx.createLinearGradient(0,0,0,H);
- const night=scene.includes("night")||scene==="night";
- grad.addColorStop(0,night?"#14223d":"#7ca7cd");
- grad.addColorStop(1,night?"#3d3651":"#dee4e0");
+ const night=gameMode&&gameBackdrop?gameBackdrop==="night":scene.includes("night")||scene==="night";
+ const evening=gameMode&&gameBackdrop==="evening";
+ grad.addColorStop(0,night?"#18233e":evening?"#ae7786":gameMode?"#97b5c3":"#7ca7cd");
+ grad.addColorStop(1,night?"#45425d":evening?"#edd1bb":gameMode?"#eee1cc":"#dee4e0");
  ctx.fillStyle=grad;ctx.fillRect(0,0,W,H);
- if(!manifest.scenes[scene]){
+ if(!manifest.scenes[gameMode&&gameBackdrop?gameBackdrop:scene]){
   ctx.globalAlpha=night?.65:.4;
   ctx.fillStyle=night?"#1b2b4a":"#c3d3d9";
   ctx.fillRect(0,H*.64,W,H*.36);
@@ -274,8 +291,10 @@ function layerVisible(l,t){
  return true;
 }
 function drawStage(t){
+ const sequenceImage=sequenceRenderer.update({
+   talk:(playing&&volume>.018)||t<nodMouthUntil,blink:(t%4200)<155});
  paintBackground(t);
- const activeBackground=previewBackgroundRef||manifest.scenes[scene];
+ const activeBackground=gameMode&&gameBackdrop?manifest.scenes[gameBackdrop]:(previewBackgroundRef||manifest.scenes[scene]);
  const bg=activeBackground?resourceImage(activeBackground):null;
  if(bg&&bg._ready)drawBackgroundImage(bg);
  const layers=[...manifest.layers].sort((a,b)=>a.z-b.z);
@@ -300,16 +319,19 @@ function drawStage(t){
              ? manifest.poses.blink
              : (manifest.poses[mood]||manifest.poses.neutral||layer.file)))
     : layer.file;
-  const im=resourceImage(poseRef);
-  if(!im||!im._ready)continue;
+  const fromSequence=isAuto&&sequenceImage;
+  const im=fromSequence||resourceImage(poseRef);
+  if(!im||(!fromSequence&&!im._ready))continue;
   let r=layer.crop;
+  const ratio=isAuto?im.width/740:1;
+  if(isAuto)r={x:r.x*ratio,y:r.y*ratio,w:r.w*ratio,h:r.h*ratio};
   const sw=clamp(r.w,1,im.width-r.x),sh=clamp(r.h,1,im.height-r.y);
   if(sw<=0||sh<=0)continue;
   ctx.save();
-  ctx.translate(W/2+layer.x+sway,H/2+layer.y+bob+nod);
-  ctx.rotate(wave);
+  ctx.translate(W/2+layer.x+(isAuto?0:sway),H/2+layer.y+(isAuto?0:bob+nod));
+  ctx.rotate(isAuto?0:wave);
   ctx.scale(layer.scale,layer.scale);
-  ctx.drawImage(im,r.x,r.y,sw,sh,-sw/2,-sh/2,sw,sh);
+  ctx.drawImage(im,r.x,r.y,sw,sh,-sw/ratio/2,-sh/ratio/2,sw/ratio,sh/ratio);
   if(selectedLayer===layer.id){
    ctx.strokeStyle="#8eebc7";ctx.lineWidth=1.7/layer.scale;
    ctx.setLineDash([7/layer.scale,5/layer.scale]);
@@ -318,9 +340,11 @@ function drawStage(t){
   ctx.restore();
  }
  // bottom info strip
- ctx.fillStyle="#0c1a30bb";ctx.fillRect(12,H-56,275,36);
- ctx.font="12px system-ui";ctx.textAlign="left";ctx.fillStyle="#e4eefc";
- ctx.fillText((settings.role_name||"角色")+" · "+moodLabels[mood]+" · "+scene,24,H-33);
+ if(!gameMode){
+  ctx.fillStyle="#0c1a30bb";ctx.fillRect(12,H-56,275,36);
+  ctx.font="12px system-ui";ctx.textAlign="left";ctx.fillStyle="#e4eefc";
+  ctx.fillText((settings.role_name||"角色")+" · "+moodLabels[mood]+" · "+scene,24,H-33);
+ }
  if(playing&&analyser&&fft){
   analyser.getByteTimeDomainData(fft);
   let sum=0;
@@ -330,6 +354,10 @@ function drawStage(t){
  requestAnimationFrame(drawStage);
 }
 requestAnimationFrame(drawStage);
+$("focusStage").onclick=()=>{
+ const focused=document.querySelector(".middle").classList.toggle("stage-focus");
+ $("focusStage").textContent=focused?"恢复对话布局":"放大舞台";
+};
 function canvasLocation(e){
  const b=stage.getBoundingClientRect(),scale=Math.min(b.width/W,b.height/H);
  const ox=(b.width-W*scale)/2,oy=(b.height-H*scale)/2;
@@ -360,7 +388,16 @@ function setAction(next){
  // Keep the LLM's face emotion independent from the body gesture.
  // For example 'worried + talk' must not silently become 'happy'.
 }
-document.querySelectorAll(".stage-toolbar [data-action]").forEach(b=>b.onclick=()=>setAction(b.dataset.action));
+document.querySelectorAll(".stage-toolbar [data-action]").forEach(b=>b.onclick=()=>{
+ const value=b.dataset.action;
+ const auto=manifest.layers.some(layer=>["__auto_emote_character","__auto_emote_kan"].includes(layer.id));
+ if(auto&&value==="nod")return previewNod(activeExpression?.label||emotionTimeline[mood]||"普通Ａ");
+ if(auto&&value==="happy"){setMood("happy");return applyMoodTimeline("happy");}
+ if(auto&&value==="sleep"){setMood("sleepy");return applyMoodTimeline("sleepy");}
+ if(auto&&value==="wave")return toast("当前只实现了点头连续预览；轻摆动作尚未验收。");
+ if(value==="idle")$("stopNod").click();
+ setAction(value);
+});
 document.querySelectorAll(".stage-toolbar [data-emotion]").forEach(b=>b.onclick=async()=>{
   setMood(b.dataset.emotion);
   setAction("idle");
@@ -391,9 +428,11 @@ async function runtimeEvent(event,extra={}){
  }
 }
 async function refreshRuntimeState(){
+ if(booting||window.gameExperience?.active)return;
  try{
   const next=await api("/api/runtime");
   const previousToken=runtimeActionToken;
+  if(Number(next.action_token||0)<previousToken)return;
   runtimeState=next;
   runtimeActionToken=Number(next.action_token||0);
   renderRuntimeSummary();
@@ -407,6 +446,7 @@ async function refreshRuntimeState(){
 }
 function renderRendererCapabilities(result){
  const current=result?.current||{};
+ const sequence=(result?.available_or_planned||[]).find(x=>x.renderer_id==="cpu_mesh_sequence_preview");
  const flags=[
   ["表情",current.expressions],["连续动作",current.continuous_motion],
   ["网格变形",current.mesh_deformation],["遮罩",current.masks],
@@ -416,7 +456,8 @@ function renderRendererCapabilities(result){
    `${current.display_name||"未知后端"} (${current.renderer_id||""})`,
    flags.map(([name,ok])=>`${name}:${ok?"✓":"—"}`).join(" · "),
    `口型：${current.lip_sync||"none"}`,
-   ...((current.notes||[]).map(x=>"• "+x))
+   ...((current.notes||[]).map(x=>"• "+x)),
+   ...(sequence?["另有可用实验后端："+sequence.display_name,...sequence.notes]:[])
  ].join("\n");
 }
 async function loadModelMetadata(){
@@ -637,6 +678,7 @@ function localSceneSlot(date=new Date()){
  return hours<7||hours>=19?"night":hours>=17?"evening":"day";
 }
 function applyAutoScene(force=false){
+ if(window.gameExperience?.active)return;
  if(!settings.auto_scene)return;
  if(runtimeState.scene_lock?.active)return;
  const slot=localSceneSlot();
@@ -677,6 +719,7 @@ $("addEvent").onclick=async()=>{
  catch{manifest.events.pop();}
 };
 function checkEvents(){
+ if(window.gameExperience?.active)return;
  const now=new Date(),date=[now.getFullYear(),String(now.getMonth()+1).padStart(2,"0"),String(now.getDate()).padStart(2,"0")].join("-");
  const minutes=now.getHours()*60+now.getMinutes();
  for(const event of manifest.events||[]){
@@ -706,21 +749,44 @@ function appendBubble(text,who="assistant",label){
  $("chatMessages").append(box);
  $("chatMessages").scrollTop=$("chatMessages").scrollHeight;
 }
-async function speak(text){
+function speak(text){
+ const generation=speechGeneration;
+ speechQueue=speechQueue.catch(()=>{}).then(()=>generation===speechGeneration?speakNow(text,generation):null);
+ return speechQueue;
+}
+async function speakNow(text,generation){
  if(!settings.tts_enabled)return;
- setStatus("正在调用 GPT-SoVITS...");
+ if(settings.tts_provider==="system"){
+  if(!window.speechSynthesis)return {error:"当前窗口不支持系统语音；文字聊天继续"};
+  const voice=speechSynthesis.getVoices().find(v=>v.localService&&v.lang.startsWith(settings.tts_text_lang));
+  if(!voice)return {error:"没有可用的本地系统语音；文字聊天继续"};
+  const utterance=new SpeechSynthesisUtterance(text);utterance.voice=voice;
+  await runtimeEvent("speech_start");
+  if(generation!==speechGeneration){await runtimeEvent("speech_end");return;}
+  playing=true;volume=.2;
+  await new Promise(resolve=>{
+   let done=false;
+   const finish=()=>{if(done)return;done=true;systemSpeechFinish=null;playing=false;volume=0;runtimeEvent("speech_end").finally(resolve);};
+   systemSpeechFinish=finish;utterance.onend=finish;utterance.onerror=finish;speechSynthesis.speak(utterance);
+  });
+  return;
+ }
+ setStatus("正在合成角色语音...");
  try{
-  const r=await fetch("/api/tts",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({text})});
+  speechFetch=new AbortController();
+  const r=await fetch("/api/tts",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({text}),signal:speechFetch.signal});
   if(!r.ok){
    let msg="音频接口返回 HTTP "+r.status;
    try{msg=(await r.json()).error||msg;}catch{}
    throw Error(msg);
   }
   const audioBlob=await r.blob();
+  if(generation!==speechGeneration)return;
   const url=URL.createObjectURL(audioBlob);
   if(currentAudio){
-    if(typeof currentAudio._characterFinish==="function")await currentAudio._characterFinish();
-    currentAudio.pause();currentAudio.src="";
+    const previousAudio=currentAudio;
+    if(typeof previousAudio._characterFinish==="function")await previousAudio._characterFinish();
+    previousAudio.pause();previousAudio.src="";
   }
   const audio=new Audio(url);currentAudio=audio;
   try{
@@ -731,6 +797,7 @@ async function speak(text){
     node.connect(analyser);analyser.connect(audioContext.destination);
   }catch(e){console.warn("无法开启音频幅度分析，仍继续播放：",e);}
   await runtimeEvent("speech_start");
+  if(generation!==speechGeneration){URL.revokeObjectURL(url);if(currentAudio===audio)currentAudio=null;await runtimeEvent("speech_end");return;}
   playing=true;volume=.2;setAction("talk");
   await new Promise((resolve,reject)=>{
     let finished=false;
@@ -750,8 +817,10 @@ async function speak(text){
   });
   setStatus("就绪");
  }catch(e){
+  if(generation!==speechGeneration)return;
   playing=false;volume=0;
   setStatus("语音连接失败");toast(e.message);
+  return {error:e.message};
  }
 }
 async function applyBehaviorPlan(plan){
@@ -763,7 +832,7 @@ async function applyBehaviorPlan(plan){
    `面部预设：${label||"(缺少对应预设)"}`,
    `动作标签：${plan.action_tag||"idle"}`,
    `动作匹配：${motion?motion.label+" → "+motion.tags.join(", "):"(无可用动作)"}`,
-   `播放能力：${motion?"PSB 单帧静态采样，不是完整连续动画":"面部表情 + 舞台模拟/待机"}`,
+   `播放能力：${motion?.playback==="frame_sequence"?"已验收 CPU 网格连续点头":motion?"PSB 单帧静态采样，不是完整连续动画":"面部表情 / 待机"}`,
    `场景：${plan.scene||"(保持当前场景)"}`,
    `调度：${plan.runtime_decision||"accepted"} · phase=${plan.runtime?.phase||runtimeState.phase||"idle"}`,
    ...(plan.warnings||[])
@@ -774,7 +843,24 @@ async function applyBehaviorPlan(plan){
    return null;
  }
  const serial=++expressionRequest;
+ stopNodPlayback();
  try{
+   if(motion?.label==="うんうん"){
+     let prepared={state:"missing"};
+     try{prepared=await api("/api/motion_sequence",{expression:label,cached_only:true});}
+     catch(error){console.warn("点头缓存不可用，使用表情预览",error.message);}
+     if(serial!==expressionRequest)return null;
+     if(prepared.state==="ready"&&prepared.sequence.reviewed){
+       const clip=prepared.sequence;nodSequence=clip;
+       if(await sequenceRenderer.play(clip)){
+         if(serial!==expressionRequest){if(sequenceRenderer.clip===clip)sequenceRenderer.stop();return null;}
+         nodRuntimeToken=plan.runtime?.action_token??runtimeActionToken;
+         await runtimeEvent("motion_started",{token:nodRuntimeToken,duration:nodSequence.duration_seconds});
+         $("expressionStatus").textContent=`${label} + 点头 · 已验收 CPU 帧序列`;
+         return prepared;
+       }
+     }
+   }
    // Overlay selected PSB action's BODY/HEAD/MOVE variables on the selected
    // expression's FACE controls. Never let a movement overwrite the facial emotion.
    const response=await api("/api/expression_apply",{
@@ -796,7 +882,7 @@ async function applyBehaviorPlan(plan){
  }
 }
 async function sendMessage(text){
- if(busy)return;
+ if(busy||booting)return;
  busy=true;$("sendBtn").disabled=true;$("chatInput").disabled=true;
  appendBubble(text,"user");
  setStatus("正在等待模型响应...");
@@ -820,13 +906,14 @@ async function sendMessage(text){
   busy=false;$("sendBtn").disabled=false;$("chatInput").disabled=false;$("chatInput").focus();
  }
 }
-$("chatForm").addEventListener("submit",e=>{e.preventDefault();const text=$("chatInput").value.trim();if(text){$("chatInput").value="";sendMessage(text);}});
+$("chatForm").addEventListener("submit",e=>{e.preventDefault();if(booting)return;const text=$("chatInput").value.trim();if(text){$("chatInput").value="";sendMessage(text);}});
 $("clearHistory").onclick=async()=>{
  if(!confirm("确认清空本机保存的聊天记录？"))return;
  try{await api("/api/clear_history",{});$("chatMessages").replaceChildren();toast("聊天记录已清空");}
  catch(e){toast(e.message);}
 };
 async function toggleMic(){
+ if(!settings.stt_enabled)return toast("语音识别已关闭，本阶段无需安装 Whisper");
  if(recording){
   recorder.stop();$("micBtn").classList.remove("recording");$("micBtn").textContent="🎙";recording=false;
   return;
@@ -897,7 +984,7 @@ $("generateScene").onclick=async()=>{
 };
 function fillSettings(){
  const mapping={
-  cfgMode:"llm_mode",cfgLlmUrl:"llm_url",cfgLlmModel:"llm_model",
+  cfgMode:"llm_mode",cfgLlmUrl:"llm_url",cfgLlmModel:"llm_model",cfgTtsProvider:"tts_provider",cfgQwenDir:"qwen_model_dir",
   cfgRoleName:"role_name",cfgPersona:"persona",cfgTtsUrl:"tts_url",
   cfgRefAudio:"tts_ref_audio",cfgTextLang:"tts_text_lang",
   cfgPromptText:"tts_prompt_text",cfgPromptLang:"tts_prompt_lang",
@@ -905,14 +992,16 @@ function fillSettings(){
   cfgImageUrl:"image_url",cfgImageModel:"image_model",cfgAssetsDir:"assets_dir"};
  for(const [dom,key] of Object.entries(mapping))$(dom).value=settings[key]??"";
  $("cfgTts").checked=!!settings.tts_enabled;
+ $("cfgStt").checked=!!settings.stt_enabled;
  $("cfgMemoryLLM").checked=settings.memory_enabled_for_llm!==false;
 }
 $("openSettings").onclick=()=>{fillSettings();$("settingsOverlay").classList.remove("hidden");};
+$("cfgMode").onchange=()=>{if($("cfgMode").value==="deepseek"){$("cfgLlmUrl").value="https://api.deepseek.com";$("cfgLlmModel").value="deepseek-flash";}};
 $("closeSettings").onclick=()=>$("settingsOverlay").classList.add("hidden");
 $("settingsOverlay").addEventListener("click",e=>{if(e.target===$("settingsOverlay"))$("closeSettings").click();});
 $("saveSettings").onclick=async()=>{
  const fields={
-  cfgMode:"llm_mode",cfgLlmUrl:"llm_url",cfgLlmModel:"llm_model",
+  cfgMode:"llm_mode",cfgLlmUrl:"llm_url",cfgLlmModel:"llm_model",cfgTtsProvider:"tts_provider",cfgQwenDir:"qwen_model_dir",
   cfgRoleName:"role_name",cfgPersona:"persona",cfgTtsUrl:"tts_url",
   cfgRefAudio:"tts_ref_audio",cfgTextLang:"tts_text_lang",
   cfgPromptText:"tts_prompt_text",cfgPromptLang:"tts_prompt_lang",
@@ -920,11 +1009,14 @@ $("saveSettings").onclick=async()=>{
   cfgImageUrl:"image_url",cfgImageModel:"image_model",cfgAssetsDir:"assets_dir"};
  let obj={
   tts_enabled:$("cfgTts").checked,
+  stt_enabled:$("cfgStt").checked,
   memory_enabled_for_llm:$("cfgMemoryLLM").checked
  };
  for(const [dom,key] of Object.entries(fields))obj[key]=$(dom).value.trim();
  try{
   const old=settings.assets_dir;
+  await window.gameExperience?.cancelPending();
+  await chatStream.cancel();await $("cancelRuntime").onclick();
   const result=await api("/api/settings",obj);settings=result.settings;
   $("settingsOverlay").classList.add("hidden");setEngine();toast("设置已保存");
   if(old!==settings.assets_dir){
@@ -1068,9 +1160,12 @@ async function applyTimeline(label,frame=0){
    return null;
  }
  const serial=++expressionRequest;
+ stopNodPlayback();
  const stat=$("expressionStatus");
  stat.textContent=`正在计算 ${label}，第 ${frame} 帧的角色表情和嘴型...`;
  try{
+  await cancelBodyForManual();
+  if(serial!==expressionRequest)return null;
   const result=await api("/api/expression_apply",{label,time:frame});
   if(serial!==expressionRequest)return null; // fast-click races must not reset the newer pose
   activeExpression=result;
@@ -1102,6 +1197,59 @@ $("sampleExpressionFrame").onclick=()=>{
 $("reloadExpressionList").onclick=async()=>{
  try{await refreshTimelines();toast("已重新读取实际角色预设");}
  catch(error){toast(error.message);}
+};
+
+function stopNodPlayback(){
+ sequenceRenderer.stop();
+ if(nodRuntimeToken!==null)runtimeEvent("motion_ended",{token:nodRuntimeToken});
+ nodRuntimeToken=null;
+}
+async function cancelBodyForManual(){
+ const state=await runtimeEvent("cancel",{reason:"manual_preview",keep_speech:true});
+ runtimeActionToken=Number(state.action_token||runtimeActionToken);
+}
+async function previewNod(expressionOverride=null){
+ const selected=selectedTimelineEntry();
+ const expression=expressionOverride||(selected?.type==="face"?selected.label:activeExpression?.label||"普通Ａ");
+ const serial=++expressionRequest;
+ stopNodPlayback();nodSequence=null;
+ $("reviewNod").disabled=true;$("reviewNod").checked=false;
+ const button=$("previewNod");button.disabled=true;
+ try{
+  await cancelBodyForManual();
+  if(serial!==expressionRequest)return;
+  let job=await api("/api/motion_sequence",{expression});
+  while(job.state==="rendering"){
+   $("nodStatus").textContent=`正在生成真实网格帧 ${Math.round(job.progress*100)}% · 可以停止等待`;
+   await new Promise(resolve=>setTimeout(resolve,700));
+   if(serial!==expressionRequest)return;
+   job=await api("/api/motion_sequence",{expression,cached_only:true});
+  }
+  if(serial!==expressionRequest)return;
+  if(job.state!=="ready")throw Error(job.error||"动作没有生成有效画面");
+  const clip=job.sequence;nodSequence=clip;
+  const started=await sequenceRenderer.play(clip);
+  if(serial!==expressionRequest){if(started&&sequenceRenderer.clip===clip)sequenceRenderer.stop();return;}
+  $("reviewNod").disabled=false;$("reviewNod").checked=nodSequence.reviewed;
+  $("nodStatus").textContent=`${nodSequence.frame_count} 帧 · ${nodSequence.distinct_visual_frames} 个不同画面 · 24 FPS · ${nodSequence.expression}`;
+ }catch(error){$("nodStatus").textContent="点头预览失败："+error.message;}
+ finally{button.disabled=false;}
+}
+$("previewNod").onclick=()=>previewNod();
+$("stopNod").onclick=()=>{
+ ++expressionRequest;stopNodPlayback();
+ if(nodSequence)activeExpression={label:nodSequence.expression,refs:nodSequence.settled_refs};
+ $("nodStatus").textContent="已停止，保持当前面部表情。";
+};
+$("testNodMouth").onclick=()=>{nodMouthUntil=performance.now()+2000;};
+$("reviewNod").onchange=async()=>{
+ if(!nodSequence)return;
+ try{
+  const result=await api("/api/motion_review",{expression:nodSequence.expression,
+    id:nodSequence.id,reviewed:$("reviewNod").checked,cached_only:true});
+  nodSequence=result.sequence;
+  $("nodStatus").textContent=nodSequence.reviewed?"当前表情的点头已允许用于对话。":"已取消对话使用，仍可手动预览。";
+ }catch(error){$("reviewNod").checked=false;toast(error.message);}
 };
 async function refreshCharacterModels(){
   const combo=$("characterModelSelect"),status=$("characterModelStatus");
@@ -1162,6 +1310,10 @@ $("applyCharacterModel").onclick=async()=>{
   }
 };
 $("cancelRuntime").onclick=async()=>{
+ ++speechGeneration;speechFetch?.abort();speechFetch=null;
+ if(window.speechSynthesis)speechSynthesis.cancel();
+ if(systemSpeechFinish)systemSpeechFinish();
+ ++expressionRequest;stopNodPlayback();
  if(currentAudio){
    const audio=currentAudio;
    if(typeof audio._characterFinish==="function")await audio._characterFinish();
@@ -1237,6 +1389,7 @@ $("runDiagnostics").onclick=async()=>{
 setInterval(refreshRuntimeState,5000);
 
 async function start(){
+ let ready=false;
  try{
   const state=await api("/api/state");
   settings=state.settings;manifest=state.manifest;
@@ -1258,6 +1411,83 @@ async function start(){
   if(settings.auto_scene)applyAutoScene(true);
   if(!settings.assets_dir)toast("请先选择 PsbDecompile 解出的 PNG/JSON 文件夹");
   checkEvents();
+  ready=true;
  }catch(e){toast("初始化失败："+e.message);setStatus("启动失败");}
+ finally{
+  booting=!ready;
+  $("chatInput").disabled=!ready;$("sendBtn").disabled=!ready;
+  $("previewNod").disabled=!ready;
+  if(ready)window.gameExperience?.ready();
+ }
 }
+
+// Adapter used by the game presentation; all expressions still pass through
+// the backend's semantic resolver and constrained local renderer API.
+const gameExpressionCache=new Map();
+function loadGameExpression(plan){
+ const label=plan.expression?.label;
+ if(!label)return Promise.reject(Error("当前造型缺少对应表情，请在设置中选择完整角色。"));
+ const model=settings.character_model;
+ const key=model+"\0"+label;
+ if(gameExpressionCache.has(key))return gameExpressionCache.get(key);
+ const promise=api("/api/expression_apply",{label,time:0}).then(async result=>{
+  if(result.model!==model)throw Error("角色造型已更换，请重新开始这段对话。");
+  await Promise.all(Object.values(result.refs).map(ref=>new Promise((resolve,reject)=>{
+   const image=new Image();image.onload=()=>{image._ready=true;imageCache.set(ref,image);resolve();};
+   image.onerror=()=>reject(Error("角色表情图片未能加载"));image.src=imgURL(ref);
+  })));
+  return result;
+ }).catch(error=>{gameExpressionCache.delete(key);throw error;});
+ gameExpressionCache.set(key,promise);return promise;
+}
+window.GameBridge={
+ get ready(){return !booting;},
+ get model(){return settings.character_model;},
+ get speaker(){return settings.role_name&&settings.role_name!=="角色"?settings.role_name:"她";},
+ emotionLabel:emotion=>moodLabels[emotion]||emotion,
+ get demo(){return settings.llm_mode==="demo";},
+ chat:(text,onText)=>chatStream.send(text,onText),
+ activateSegment:(turnId,index)=>api('/api/chat_segment',{turn_id:turnId,index}),
+ prepareSegment:segment=>loadGameExpression(segment.behavior),
+ async cancelChat(){await chatStream.cancel();},
+ speak,
+ async applyChat(result,isCurrent){
+  if(!isCurrent())return;
+  const rendered=await loadGameExpression(result.behavior);
+  if(!isCurrent())return;
+  ++expressionRequest;stopNodPlayback();activeExpression=rendered;
+  setMood(result.emotion);setAction("idle");
+  if(result.runtime){runtimeState=result.runtime;runtimeActionToken=Number(result.runtime.action_token||runtimeActionToken);}
+  if(result.scene)setScene(result.scene,"ai");
+  if(result.behavior.motion)await applyBehaviorPlan(result.behavior);
+ },
+ async apply(plan,isCurrent){
+  const rendered=await loadGameExpression(plan);
+  if(!isCurrent())return;
+  ++expressionRequest;stopNodPlayback();selectedLayer="";
+  activeExpression=rendered;setMood(plan.emotion);setAction("idle");
+ },
+ warm:plan=>loadGameExpression(plan).catch(()=>null),
+ async stopSpeech(){await $("cancelRuntime").onclick();},
+ location(slot){
+  gameBackdrop=slot;
+  const available=Object.keys(manifest.scenes);
+  const key=available.includes(slot)?slot:slot==="evening"&&available.includes("day")?"day":available[0];
+  if(key)setScene(key,"manual");
+ },
+ scenes:()=>Object.keys(manifest.scenes).map(id=>({id,title:({day:"白天",evening:"傍晚",night:"夜晚"})[id]||id})),
+ async models(){return (await api("/api/character_models")).models.filter(item=>item.available);},
+ async changeModel(model){
+  const result=await api("/api/character_model",{name:model});
+  manifest=result.manifest;settings.character_model=result.selected;
+  activeExpression=null;imageCache.clear();gameExpressionCache.clear();
+  await refreshTimelines();renderLayers();
+ },
+ mode(game){
+  gameMode=game;document.body.classList.toggle("game-mode",game);
+  const url=new URL(location.href);url.searchParams.set("mode",game?"game":"studio");
+  history.replaceState(null,"",url);selectedLayer="";
+ },
+ connections(){fillSettings();$("settingsOverlay").classList.remove("hidden");},
+};
 start();

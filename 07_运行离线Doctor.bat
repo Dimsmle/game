@@ -1,5 +1,5 @@
 @echo off
 chcp 65001 >nul
 cd /d "%~dp0"
-python main_desktop.py --doctor
+call "%~dp0project_python.bat" main_desktop.py --doctor
 pause

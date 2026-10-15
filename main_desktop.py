@@ -19,8 +19,10 @@ import webbrowser
 
 from emote_model import find_model, PoseModel
 from pose_renderer import AtlasRenderer
+from motion_probe import export_motion_probe
 from studio import app as studio
 from studio import backgrounds, diagnostics, model_meta
+from studio.frame_sequence import SequenceJobs, sequence_key, export_nod_sequence
 
 DEFAULT_ROOT=Path(r"G:\开发游戏\Amakano3_AI")
 POSE_KEYS={
@@ -32,8 +34,52 @@ POSE_KEYS={
     "shy":"照れＡ",
     "sleepy":"目下閉じＡ",
 }
-RENDER_VERSION="5.1"
+RENDER_VERSION="5.2"
 POSE_SIZE=(740,1250)
+SEQUENCE_JOBS=SequenceJobs()
+
+
+def adapt_sequence_behavior(plan,catalog):
+    """Prefer a reviewed/renderable nod over a same-tag static timeline."""
+    if plan.get("action_tag") not in ("nod","agree") or not plan.get("expression"):
+        return plan
+    candidate=next((item for item in catalog if item.get("label")=="うんうん"
+                    and plan["action_tag"] in item.get("tags",[])),None)
+    root=studio.asset_root()
+    if candidate is None or root is None:return plan
+    try:
+        job=request_nod_sequence(root,plan["model"],plan["expression"]["label"],True)
+    except (ValueError,OSError):return plan
+    sequence=job.get("sequence",{})
+    if job["state"]!="ready" or not sequence.get("reviewed"):return plan
+    return {**plan,"motion":{
+        "id":candidate["id"],"label":"うんうん","sample_time":0,
+        "tags":candidate["tags"],"playback":"frame_sequence",
+        "status":"reviewed_cpu_preview","duration_seconds":sequence["duration_seconds"],
+    },"playback_status":"playable",
+        "warnings":["已验收的实验 CPU Bezier 点头；不含完整 E-mote mask/physics"]}
+
+
+def request_nod_sequence(root,model_name,expression,cached_only=False):
+    entry=discover_model(Path(root),model_name)
+    if entry is None or not entry["available"]:
+        raise ValueError("当前角色素材不完整")
+    model=PoseModel(entry["path"])
+    faces={x["label"] for x in model.expression_catalog() if x["type"]=="face"}
+    if not isinstance(expression,str) or expression not in faces:
+        raise ValueError("请选择当前模型的面部表情")
+    signature=pose_signature(entry["path"],entry["textures"],model.resx_path)
+    key=sequence_key(model_name,expression,signature)
+    def builder(progress):
+        return export_nod_sequence(model,AtlasRenderer(model,entry["textures"]),
+                                   root,key,expression,progress)
+    result=SEQUENCE_JOBS.request(root,key,None if cached_only else builder)
+    if result.get("sequence"):
+        reviews=studio.read_json(studio.DATA/"sequence_reviews.json",{})
+        reviewed=reviews.get(key) is True
+        result["sequence"]["reviewed"]=reviewed
+        result["sequence"]["playable"]=reviewed
+    return result
 
 def write_startup_error(exc):
     base=Path(os.getenv("LOCALAPPDATA") or Path.home())/"CharacterLab"/"logs"
@@ -390,6 +436,27 @@ class StudioHandler(studio.Handler):
         return super().do_GET()
 
     def do_POST(self):
+        if self.path.split("?",1)[0] in ("/api/motion_sequence","/api/motion_review"):
+            try:
+                self.verify_origin()
+                request=json.loads(self.recv())
+                if not isinstance(request,dict):raise ValueError("请求体必须是对象")
+                current=studio.STATE["settings"].get("character_model","")
+                result=request_nod_sequence(self.server.asset_root,current,
+                    request.get("expression"),bool(request.get("cached_only",False)))
+                if self.path.split("?",1)[0]=="/api/motion_review":
+                    if result["state"]!="ready" or result["id"]!=request.get("id"):
+                        raise ValueError("请先完整预览当前版本的动作")
+                    if not isinstance(request.get("reviewed"),bool):
+                        raise ValueError("reviewed 必须是布尔值")
+                    with studio.LOCK:
+                        reviews=studio.read_json(studio.DATA/"sequence_reviews.json",{})
+                        reviews[result["id"]]=request["reviewed"]
+                        studio.atomic_json(studio.DATA/"sequence_reviews.json",reviews)
+                    result["sequence"]["reviewed"]=request["reviewed"]
+                    result["sequence"]["playable"]=request["reviewed"]
+                return self.reply(200,result)
+            except (ValueError,OSError) as exc:return self.err(exc)
         if self.path.split("?",1)[0]=="/api/expression_apply":
             try:
                 self.verify_origin()
@@ -437,6 +504,7 @@ class StudioHandler(studio.Handler):
 def start_server(port=8765, root=None):
     from http.server import ThreadingHTTPServer
     root=Path(root or studio.STATE["settings"]["assets_dir"]).resolve()
+    studio.PLAN_RENDER_ADAPTER=adapt_sequence_behavior
     try:
         server=ThreadingHTTPServer(("127.0.0.1",port),StudioHandler)
     except OSError:
@@ -457,9 +525,15 @@ def main():
     parser.add_argument("--list-backgrounds",action="store_true",help="显示已发现的背景数量及样例")
     parser.add_argument("--doctor",action="store_true",help="运行离线环境自检并退出，不连接外部服务")
     parser.add_argument("--browser",action="store_true",help="使用浏览器而不是本地 WebView2 窗口")
+    parser.add_argument("--studio",action="store_true",help="打开开发工作台（默认进入游戏舞台）")
     parser.add_argument("--choose-root",action="store_true",help="启动时选择素材根目录")
     parser.add_argument("--force-render",action="store_true",help="强制重新生成基础表情及口型状态图")
     parser.add_argument("--no-poses",action="store_true",help="跳过自动姿势组装")
+    parser.add_argument("--motion-probe",metavar="LABEL",help="导出一个真实动作的均匀采样验收帧")
+    parser.add_argument("--probe-expression",default="笑顔Ａ",help="动作探针保持的面部预设")
+    parser.add_argument("--probe-samples",type=int,default=9,help="动作探针采样数（5–31）")
+    parser.add_argument("--probe-fps",type=int,default=24,help="候选帧序列目标 FPS（24–30）")
+    parser.add_argument("--export-nod",action="store_true",help="导出实验 CPU 网格点头连续帧")
     parser.add_argument("--port",type=int,default=8765)
     args=parser.parse_args()
     setup_persistent_config()
@@ -467,7 +541,7 @@ def main():
     if args.doctor:
         report=diagnostics.run(studio.DATA,root if root.is_dir() else None,
                                studio.STATE["settings"],
-                               studio.STATE["settings"].get("character_model",""))
+                               args.model or studio.STATE["settings"].get("character_model",""))
         print(diagnostics.format_text(report))
         return 0 if report["errors"]==0 else 3
     if args.choose_root or not root.is_dir():
@@ -503,6 +577,32 @@ def main():
             # Never guess which is clothed. Prefer a nonzero model if locally available.
             chosen=("kan_10" if "kan_10" in options else options[0])
             print("自动选择已有模型：",chosen,"（不代表已确认有衣服）")
+        if args.export_nod:
+            result=request_nod_sequence(root,chosen,args.probe_expression)
+            while result["state"]=="rendering":
+                print("点头序列生成：",round(result["progress"]*100),"%",flush=True)
+                threading.Event().wait(3)
+                result=request_nod_sequence(root,chosen,args.probe_expression,True)
+            print(json.dumps({k:v for k,v in result.items() if k!="sequence"},ensure_ascii=False))
+            if result["state"]!="ready":return 4
+            print("已输出",result["sequence"]["frame_count"],"帧；",
+                  result["sequence"]["distinct_visual_frames"],"个不同画面；待人工验收")
+            return 0
+        if args.motion_probe:
+            entry=candidates[chosen]
+            model=PoseModel(entry["path"])
+            renderer=AtlasRenderer(model,entry["textures"])
+            safe_id=hashlib.sha256(
+                (chosen+"\0"+args.probe_expression+"\0"+args.motion_probe).encode("utf-8")
+            ).hexdigest()[:12]
+            out=root/"character_exports"/"motion_probes"/(chosen+"_"+safe_id)
+            result=export_motion_probe(
+                model,renderer,out,expression_label=args.probe_expression,
+                motion_label=args.motion_probe,samples=args.probe_samples,
+                target_fps=args.probe_fps,size=POSE_SIZE)
+            print(json.dumps(result,ensure_ascii=False,indent=2))
+            print("动作探针目录：",out)
+            return 0 if result["status"]=="needs_manual_review" else 4
         if not args.no_poses:
             print("正在读取真实 E-mote 部件、预设和纹理坐标...")
             output,model=prepare_character(root,args.force_render,chosen)
@@ -511,9 +611,9 @@ def main():
             with studio.LOCK:
                 studio.STATE["settings"]["assets_dir"]=str(root.resolve())
         server,thread=start_server(args.port,root)
-        url=f"http://127.0.0.1:{server.server_port}/"
+        url=f"http://127.0.0.1:{server.server_port}/?mode={'studio' if args.studio else 'game'}"
         print("Character Studio 地址：",url)
-        print("LLM 默认演示模式；要使用真实 DeepSeek，请在右上角模型设置配置。")
+        print("默认进入游戏舞台，预设对话无语音、无需 AI；右上角设置可打开开发工作台。")
         try:
             use_browser=args.browser
             if not use_browser:
@@ -529,8 +629,9 @@ def main():
                 thread.join()
             else:
                 webview.create_window(
-                    "Character Studio v0.7 · Amakano3",url,
-                    width=1480,height=900,min_size=(1030,670),
+                    "Character Studio v0.11",url,
+                    width=1280 if not args.studio else 1480,height=760 if not args.studio else 900,
+                    min_size=(800,540) if not args.studio else (1030,670),
                     background_color="#0b101b"
                 )
                 # Force WebView2/EdgeChromium rather than obsolete IE rendering.

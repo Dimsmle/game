@@ -57,11 +57,14 @@ STATIC_PREVIEW=RendererCapabilities(
 
 FRAME_SEQUENCE_TARGET=RendererCapabilities(
     renderer_id="frame_sequence_target",
-    display_name="透明帧序列（规划中的中间后端）",
+    display_name="透明帧序列（已有验收门，播放后端待实现）",
     expressions=True,expression_blend=False,motion_preview=True,
     continuous_motion=True,mesh_deformation=False,masks=False,physics=False,
     lip_sync="overlay_or_audio_amplitude",transparent_background=True,
-    notes=("尚未实现；只有生成并人工验收的连续帧资源才能标记 playable",)
+    notes=(
+        "动作探针已能拒绝像素完全相同的伪序列",
+        "播放后端尚未实现；只有生成并人工验收的连续帧资源才能标记 playable",
+    )
 )
 
 LIVE2D_TARGET=RendererCapabilities(
@@ -73,9 +76,20 @@ LIVE2D_TARGET=RendererCapabilities(
     notes=("需要合法制作并 rig 的 Cubism 模型，PSB 不能直接改名转换成 moc3",)
 )
 
+CPU_MESH_SEQUENCE=RendererCapabilities(
+    renderer_id="cpu_mesh_sequence_preview",
+    display_name="CPU Bezier 点头帧序列（实验）",
+    expressions=True,expression_blend=False,motion_preview=True,
+    continuous_motion=True,mesh_deformation=True,masks=False,physics=False,
+    lip_sync="three_state_per_frame",transparent_background=True,
+    notes=("已实现：24 FPS、按时钟播放、中断、每帧口型/眨眼、同表情恢复",
+           "仅支持うんうん的 head_UD 4×4 Bezier 网格；不是完整 E-mote 引擎",
+           "逐模型、逐表情预览验收后才能用于对话"),
+)
+
 def current_capabilities(renderer_id="static_emote_preview"):
-    table={x.renderer_id:x for x in (STATIC_PREVIEW,FRAME_SEQUENCE_TARGET,LIVE2D_TARGET)}
+    table={x.renderer_id:x for x in (STATIC_PREVIEW,CPU_MESH_SEQUENCE,FRAME_SEQUENCE_TARGET,LIVE2D_TARGET)}
     return table.get(renderer_id,STATIC_PREVIEW).to_dict()
 
 def all_capabilities():
-    return [x.to_dict() for x in (STATIC_PREVIEW,FRAME_SEQUENCE_TARGET,LIVE2D_TARGET)]
+    return [x.to_dict() for x in (STATIC_PREVIEW,CPU_MESH_SEQUENCE,FRAME_SEQUENCE_TARGET,LIVE2D_TARGET)]

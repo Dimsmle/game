@@ -24,12 +24,14 @@ import sqlite3
 import subprocess
 import tempfile
 import threading
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
 import webbrowser
 
 from studio import backgrounds, behavior, runtime as behavior_runtime, renderers, diagnostics, model_meta
+from studio import replies
 
 ROOT = Path(__file__).resolve().parent
 WEB = ROOT / "web"
@@ -41,17 +43,20 @@ SETTINGS_FILE = DATA / "settings.json"
 MANIFEST_FILE = DATA / "manifest.json"
 DB_FILE = DATA / "history.sqlite3"
 MAX_BODY = 24 * 1024 * 1024
-APP_VERSION="0.7.0"
+APP_VERSION="0.11.0"
 
 DEFAULT_SETTINGS = {
     "assets_dir":"",
     "llm_mode":"demo",
-    "llm_url":"http://127.0.0.1:15721/v1",
-    "llm_model":"",
+    "llm_url":"https://api.deepseek.com",
+    "llm_model":"deepseek-flash",
     "role_name":"角色",
     "character_model":"",
     "persona":"温柔、自然地交谈，简短回答；在用户需要时主动关心，但不假装现实中的身体接触。",
     "tts_enabled":False,
+    "tts_provider":"gpt_sovits",
+    "qwen_model_dir":"",
+    "stt_enabled":False,
     "auto_scene":False,
     "memory_enabled_for_llm":True,
     "tts_url":"http://127.0.0.1:9880/tts",
@@ -88,6 +93,11 @@ ASR_MODEL=None
 STATE={}
 RUNTIME=behavior_runtime.BehaviorRuntime()
 BEHAVIOR_CACHE={"key":None,"value":None}
+PLAN_RENDER_ADAPTER=None
+CHAT_LOCK=threading.RLock()
+ACTIVE_CHAT=None
+LLM_METRICS={}
+REPLY_TURN=replies.ReplyTurn()
 
 def app_log(event,detail=""):
     """Append a bounded local diagnostic line without request bodies or secrets."""
@@ -156,13 +166,17 @@ def backup_behavior_file():
     return target
 
 def runtime_event(event,obj=None):
+    if event=="motion_started":
+        return RUNTIME.motion_started((obj or {}).get("token"),(obj or {}).get("duration",0))
+    if event=="motion_ended":
+        return RUNTIME.motion_ended((obj or {}).get("token"))
     obj=obj or {}
     if event=="speech_start":
         return RUNTIME.speech_start()
     if event=="speech_end":
         return RUNTIME.speech_end()
     if event=="cancel":
-        return RUNTIME.cancel(str(obj.get("reason","user")))
+        return RUNTIME.cancel(str(obj.get("reason","user")),keep_speech=obj.get("keep_speech") is True)
     if event=="scene_lock":
         scene=str(obj.get("scene",""))
         if scene not in STATE.get("manifest",{}).get("scenes",{}):
@@ -319,6 +333,9 @@ def scan_assets():
         return result
     # Scan decompiled images and their corresponding JSON, not PFS archives.
     for parent,dirs,files in os.walk(root,followlinks=False):
+        if Path(parent)==root/"character_exports":
+            dirs[:]=[d for d in dirs if d not in
+                     {"sequences","expressions","diagnostics","motion_probes","mesh_poc"}]
         dirs[:]=sorted(
             [d for d in dirs if not (Path(parent)/d).is_symlink()],
             key=lambda name:(0 if name=="character_exports" else 1,name)
@@ -436,14 +453,16 @@ def validate_settings(obj):
         if key not in obj:
             continue
         v=obj[key]
-        if key in ("tts_enabled","auto_scene","memory_enabled_for_llm"):
+        if key in ("tts_enabled","auto_scene","memory_enabled_for_llm","stt_enabled"):
             out[key]=bool(v)
         elif not isinstance(v,str) or len(v)>4000:
             raise ValueError("设置字段内容无效：" + key)
         else:
             out[key]=v
-    if out["llm_mode"] not in ("demo","openai"):
+    if out["llm_mode"] not in ("demo","openai","deepseek"):
         raise ValueError("不支持的大模型模式")
+    if out["tts_provider"] not in ("gpt_sovits","qwen3_tts","system"):
+        raise ValueError("不支持的语音提供者")
     for key in ("llm_url","tts_url"):
         validate_api_url(out[key])
     if out["image_url"]:
@@ -475,13 +494,16 @@ def chat_url(base):
     return u+"/chat/completions"
 
 def mock_reply(text):
+    if "点头" in text:
+        return {"speech":"嗯，我同意。这是点头与表情的离线演示。",
+                "emotion":"happy","action_tag":"nod","scene":""}
     if any(w in text for w in ("晚安","睡觉","困了")):
         return {"speech":"晚安。这里是演示回答，尚未连接语言模型。","emotion":"sleepy","action":"sleep","scene":"night"}
     if any(w in text for w in ("开心","高兴","早上好","你好")):
         return {"speech":"你好呀！这是离线演示回复。你可以在设置里接入 DeepSeek。","emotion":"happy","action":"happy","scene":""}
     if "挥手" in text:
         return {"speech":"我试着向你挥挥手。这是画布模拟动作，不是游戏原生骨骼动画。","emotion":"gentle","action":"wave","scene":""}
-    return {"speech":"我收到你的话了。这是演示模式，接入本地模型后我才能自由回答。","emotion":"gentle","action":"nod","scene":""}
+    return {"speech":"我收到你的话了。这是演示模式，接入对话 API 后我才能自由回答。","emotion":"gentle","action":"nod","scene":""}
 
 def current_behavior_context():
     """Return the active model timeline catalog with a small mtime-based cache.
@@ -519,13 +541,15 @@ def current_behavior_context():
         BEHAVIOR_CACHE["value"]={"catalog":catalog,"annotations":annotations}
     return model_name,catalog,annotations
 
-def planned_reply(value):
+def planned_reply(value,activate=True):
     """Strict LLM response -> stage-compatible response + audited behavior plan."""
     scenes=[key for key,ref in STATE["manifest"].get("scenes",{}).items() if ref]
     clean=behavior.normalize_llm_reply(value,scenes)
     model_name,catalog,annotations=current_behavior_context()
     plan=behavior.resolve_behavior(clean,model_name,catalog,annotations,scenes)
-    plan=RUNTIME.submit_plan(plan,source="ai")
+    if callable(PLAN_RENDER_ADAPTER):
+        plan=PLAN_RENDER_ADAPTER(plan,catalog)
+    if activate:plan=RUNTIME.submit_plan(plan,source="ai")
     fallback_actions={"nod":"nod","agree":"nod","wave":"wave",
                       "greet":"wave","smile":"happy","laugh":"happy",
                       "talk":"talk","sleep":"sleep"}
@@ -535,7 +559,7 @@ def planned_reply(value):
             if plan.get("motion") else "idle")
     return {"speech":clean["speech"],"emotion":clean["emotion"],
             "action_tag":clean["action_tag"],"action":legacy,
-            "intensity":clean["intensity"],"scene":clean["scene"],
+            "intensity":clean["intensity"],"scene":clean["scene"],"voice_style":clean["voice_style"],
             "behavior":plan,"runtime":plan.get("runtime",RUNTIME.snapshot())}
 
 def parse_reply(value):
@@ -543,7 +567,19 @@ def parse_reply(value):
     return planned_reply(value)
 
 def chat_response(user_text):
+    with CHAT_LOCK:
+        REPLY_TURN.clear()
+        if ACTIVE_CHAT:ACTIVE_CHAT['cancel'].set()
     settings=STATE["settings"]
+    if settings["llm_mode"]=="deepseek":
+        result=None
+        for event in stream_chat(user_text,"internal_"+str(time.monotonic_ns()),segmented=False):
+            if event["type"]=="final":result=event["result"]
+        if result is None:raise RuntimeError("本轮对话已取消")
+        # Legacy workbench consumes a whole reply, not the new sentence player.
+        first=activate_reply(result['turn_id'],0)
+        result.update(behavior=first['behavior'],runtime=first['runtime'])
+        return result
     if settings["llm_mode"]=="demo":
         output=planned_reply(mock_reply(user_text))
         origin="demo"
@@ -582,14 +618,99 @@ def chat_response(user_text):
     output["source"]=origin
     return output
 
-def synthesize(text):
+def cancel_chat(request_id):
+    with CHAT_LOCK:
+        if ACTIVE_CHAT and ACTIVE_CHAT["id"]==request_id:ACTIVE_CHAT["cancel"].set()
+
+
+def activate_reply(token,index):
+    with CHAT_LOCK,LOCK:
+        def apply_segment(intent):
+            turn=REPLY_TURN.current
+            visible='\n'.join(item['speech'] for item in turn['segments'][:index+1])
+            history_id=turn['history_id']
+            with connect_db() as db:
+                if history_id is None:
+                    db.execute('INSERT INTO messages(created_at,role,content,source) VALUES(?,?,?,?)',
+                        (datetime.now().isoformat(),'user',turn['user_text'],'user'))
+                    cursor=db.execute('INSERT INTO messages(created_at,role,content,source) VALUES(?,?,?,?)',
+                        (datetime.now().isoformat(),'assistant',visible,turn['source']))
+                    history_id=cursor.lastrowid
+                else:
+                    updated=db.execute('UPDATE messages SET content=? WHERE id=? AND role=?',(visible,history_id,'assistant'))
+                    if updated.rowcount!=1:raise ValueError('聊天记录已被清理，请开始新的对话')
+                result=planned_reply(intent)
+            turn['history_id']=history_id
+            return result
+        return REPLY_TURN.activate(token,index,STATE['settings'],apply_segment)
+
+
+def stream_chat(user_text,request_id,segmented=True):
+    """Preview text streams; only a completed, current JSON reply can act/commit."""
+    global ACTIVE_CHAT,LLM_METRICS
+    from .llm import OpenAICompatibleProvider,Cancelled,speech_prefix
+    settings=dict(STATE["settings"]); began=time.monotonic(); first=None
+    job={"id":request_id,"cancel":threading.Event()}
+    with CHAT_LOCK:
+        if ACTIVE_CHAT:ACTIVE_CHAT["cancel"].set()
+        ACTIVE_CHAT=job
+        REPLY_TURN.clear()
+    try:
+        if settings["llm_mode"]=="demo":
+            intent=replies.demo_reply(user_text,mock_reply(user_text))
+            raw=json.dumps(intent,ensure_ascii=False)
+            yield {"type":"text","text":speech_prefix(raw)}
+        else:
+            if not settings["llm_model"].strip():raise ValueError("请填写模型 ID")
+            validate_api_url(settings["llm_url"])
+            scenes=[k for k,v in STATE["manifest"].get("scenes",{}).items() if v]
+            prompt=("你是具有固定性格的虚拟角色。用中文自然交谈，回复一到三句。"
+                +behavior.llm_instructions(scenes,RUNTIME.context_hint())
+                +(replies.instructions() if segmented else '\n请先输出 speech 字段。')
+                +"你的名字："+settings["role_name"][:100]+"；性格："+settings["persona"][:1000])
+            if settings.get("memory_enabled_for_llm",True):prompt+='\n'+memory_context()
+            messages=[{"role":"system","content":prompt}]
+            messages.extend({"role":x["role"],"content":x["content"]} for x in history(12) if x["role"] in ("user","assistant"))
+            messages.append({"role":"user","content":user_text})
+            raw="";visible=""
+            for piece in OpenAICompatibleProvider(settings).stream(messages,job["cancel"]):
+                raw+=piece
+                if len(raw)>24000:raise RuntimeError("模型输出超过本轮限制")
+                preview=speech_prefix(raw)
+                if preview!=visible:
+                    if first is None:first=round((time.monotonic()-began)*1000)
+                    visible=preview;yield {"type":"text","text":preview}
+        try:intent=json.loads(raw)
+        except ValueError:raise RuntimeError("模型未返回有效 JSON；没有执行行为或保存本轮，可重试") from None
+        scenes=[k for k,v in STATE['manifest'].get('scenes',{}).items() if v]
+        segments=replies.normalize_segments(intent,scenes)
+        if not segmented:segments=[{**segments[0],'speech':'\n'.join(item['speech'] for item in segments)}]
+        with CHAT_LOCK,LOCK:
+            if job["cancel"].is_set() or ACTIVE_CHAT is not job:raise Cancelled("已停止本轮对话")
+            if settings!=STATE["settings"]:raise Cancelled("配置或角色已变化，请重新发送")
+            prepared_segments=[planned_reply(item,activate=False) for item in segments]
+            result=dict(prepared_segments[0])
+            result['speech']='\n'.join(item['speech'] for item in segments)
+            origin='demo' if settings['llm_mode']=='demo' else settings['llm_mode']
+            LLM_METRICS={'first_text_ms':first,'total_ms':round((time.monotonic()-began)*1000),'source':origin}
+            app_log('llm.metrics',json.dumps(LLM_METRICS))
+            result.update(source=origin,metrics=dict(LLM_METRICS))
+            result.update(segments=prepared_segments,turn_id=REPLY_TURN.register(segments,settings,origin,user_text))
+        yield {"type":"final","result":result}
+    finally:
+        job["cancel"].set()
+        with CHAT_LOCK:
+            if ACTIVE_CHAT is job:ACTIVE_CHAT=None
+
+
+def synthesize_gpt(text):
     s=STATE["settings"]
     if not s["tts_enabled"]:
-        raise ValueError("当前未开启 GPT-SoVITS")
+        raise ValueError("当前未开启语音")
     if not s["tts_ref_audio"].strip():
         raise ValueError("GPT-SoVITS api_v2 需要参考音频路径；请在设置中填写服务器可访问的 ref_audio_path")
     payload={
-        "text":text[:350],
+        "text":text[:900],
         "text_lang":s["tts_text_lang"],
         "ref_audio_path":s["tts_ref_audio"],
         "prompt_text":s["tts_prompt_text"],
@@ -609,13 +730,25 @@ def synthesize(text):
                 raise RuntimeError("语音返回内容过短")
             return audio
     except urllib.error.HTTPError as err:
-        details=err.read(600).decode("utf-8","replace")
-        raise RuntimeError(f"语音接口 HTTP {err.code}: {details[:200]}") from err
+        err.close()
+        raise RuntimeError(f"语音接口 HTTP {err.code}，请检查本地 TTS 服务配置") from None
     except urllib.error.URLError as err:
         raise RuntimeError("无法连接语音服务："+str(err.reason)) from err
 
+from .tts import TTSService
+TTS_SERVICE=TTSService(synthesize_gpt)
+
+
+def synthesize(text):
+    if not isinstance(text,str) or not 1<=len(text.strip())<=900:raise ValueError("语音文本须为 1–900 字")
+    audio=TTS_SERVICE.synthesize(text,dict(STATE["settings"]),DATA)
+    app_log('tts.metrics',json.dumps(TTS_SERVICE.last_metrics))
+    return audio
+
+
 def asr_audio(blob):
     global ASR_MODEL
+    if not STATE["settings"].get("stt_enabled",False):raise ValueError("语音识别已关闭，本阶段无需安装 Whisper")
     path=STATE["settings"].get("asr_model_path","").strip()
     if not path:
         raise ValueError("尚未配置本地 faster-whisper 模型路径（不会自动下载大型模型）")
@@ -779,8 +912,11 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if path=="/":
                 return self.static(WEB/"index.html","text/html; charset=utf-8")
-            if path in ("/style.css","/app.js"):
+            if path in ("/style.css","/app.js","/frame_sequence.js","/dialogue_player.js","/chat_stream.js","/reply_player.js","/game.js","/game.css"):
                 return self.static(WEB/path[1:])
+            if path=="/api/demo_scenes":
+                from . import dialogue
+                return self.reply(200,{"scenes":dialogue.summaries()})
             if path=="/api/health":
                 return self.reply(200,{"ok":True,"version":APP_VERSION,
                     "asset_root_selected":asset_root() is not None,
@@ -788,6 +924,10 @@ class Handler(BaseHTTPRequestHandler):
                     "renderer":renderers.current_capabilities()})
             if path=="/api/runtime":
                 return self.reply(200,RUNTIME.snapshot())
+            if path=="/api/provider_status":
+                return self.reply(200,{"deepseek_key_present":bool(os.environ.get("DEEPSEEK_API_KEY")),
+                    "llm_metrics":LLM_METRICS,"tts_metrics":TTS_SERVICE.last_metrics,
+                    "stt_enabled":STATE["settings"].get("stt_enabled",False)})
             if path=="/api/log_tail":
                 return self.reply(200,{"lines":log_tail(120),
                     "path":str(DATA/"logs"/"app.log"),
@@ -891,6 +1031,23 @@ class Handler(BaseHTTPRequestHandler):
                     STATE["settings"]=validate_settings(obj)
                     atomic_json(SETTINGS_FILE,STATE["settings"])
                 return self.reply(200,{"ok":True,"settings":STATE["settings"]})
+            if path=="/api/demo_scene":
+                from . import dialogue
+                model,catalog,library=current_behavior_context()
+                return self.reply(200,dialogue.compile_scene(obj.get("id"),model,catalog,library))
+            if path=="/api/chat_cancel":
+                cancel_chat(str(obj.get("id","")))
+                return self.reply(200,{"ok":True})
+            if path=="/api/chat_turn_cancel":
+                with CHAT_LOCK:REPLY_TURN.cancel(obj.get('turn_id'))
+                return self.reply(200,{'ok':True})
+            if path=="/api/chat_segment":
+                return self.reply(200,activate_reply(obj.get('turn_id'),obj.get('index')))
+            if path=="/api/chat_stream":
+                msg=obj.get("text","");request_id=obj.get("id","")
+                if not isinstance(msg,str) or not 1<=len(msg.strip())<=1200:raise ValueError("请输入 1–1200 字")
+                if not isinstance(request_id,str) or not re.fullmatch(r"[a-zA-Z0-9_-]{8,80}",request_id):raise ValueError("请求编号无效")
+                return self.stream_reply(msg.strip(),request_id)
             if path=="/api/manifest":
                 with LOCK:
                     STATE["manifest"]=validate_manifest(obj)
@@ -963,6 +1120,9 @@ class Handler(BaseHTTPRequestHandler):
                     raise ValueError("请输入 1–1200 字的对话内容")
                 return self.reply(200,chat_response(msg.strip()))
             if path=="/api/clear_history":
+                with CHAT_LOCK:
+                    REPLY_TURN.clear()
+                    if ACTIVE_CHAT:ACTIVE_CHAT['cancel'].set()
                 with connect_db() as db:
                     db.execute("DELETE FROM messages");db.commit()
                 return self.reply(200,{"ok":True})
@@ -976,6 +1136,28 @@ class Handler(BaseHTTPRequestHandler):
             print("内部错误",detail)
             app_log("server.error",detail)
             self.err(RuntimeError("服务器内部错误（详见本机 app.log）"),500)
+
+    def stream_reply(self,text,request_id):
+        self.send_response(200)
+        self.send_header('Content-Type','application/x-ndjson; charset=utf-8')
+        self.send_header('Cache-Control','no-store')
+        self.send_header('X-Content-Type-Options','nosniff')
+        self.send_header('Connection','close');self.end_headers();self.close_connection=True
+        def write(item):
+            self.wfile.write((json.dumps(item,ensure_ascii=False)+'\n').encode());self.wfile.flush()
+        iterator=stream_chat(text,request_id)
+        try:
+            try:
+                for event in iterator:write(event)
+            except Exception as exc:
+                from .llm import Cancelled
+                known=isinstance(exc,(ValueError,RuntimeError,OSError))
+                if not known:app_log('llm.stream_error',type(exc).__name__)
+                write({'type':'cancelled' if isinstance(exc,Cancelled) else 'error',
+                    'error':str(exc)[:350] if known else '对话服务内部错误，请重试'})
+        except (OSError,ConnectionError):cancel_chat(request_id)
+        finally:iterator.close()
+
 
 def pick_dir():
     try:

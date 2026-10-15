@@ -104,6 +104,15 @@ class RealSchemaSyntheticTest(unittest.TestCase):
         self.assertEqual(PoseModel._sample_key(frames,1,"icon"),"tear_icon")
         self.assertEqual(PoseModel._sample_key(frames,2,"src"),"blank")
 
+    def test_type_zero_end_marker_clears_fade_sprite(self):
+        frames=[
+            {"time":0,"type":2,"content":{"src":"tex","icon":"overlay"}},
+            {"time":60,"type":0}
+        ]
+        self.assertEqual(PoseModel._sample_key(frames,59,"icon"),"overlay")
+        self.assertIsNone(PoseModel._sample_key(frames,60,"src"))
+        self.assertIsNone(PoseModel._sample_key(frames,60,"icon"))
+
     def test_eye_blink_keeps_special_eye_shapes(self):
         # Neutral=0; closed eye=10. Special 31..50 are actual expression IDs.
         self.assertEqual(self.m.safe_blink_override("普通Ａ"),{"face_eye_open":10})

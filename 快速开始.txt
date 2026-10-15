@@ -1,5 +1,9 @@
-Character Studio v0.7 · 快速开始
+Character Studio v0.9 · 快速开始
 ====================================
+
+现在默认打开“角色舞台 + 对话框 + 设置按钮”的游戏模式。
+选择三段无声对话之一，点击继续并在弹窗中选择回应，检查每句话的表情。
+开发界面另用 10_打开开发工作台.bat；详情见 docs\V0.9_GAME_SCENES.md。
 
 1) Windows / PyCharm 选择 Conda Python 3.11
 2) 安装：
@@ -40,4 +44,8 @@ Windows EXE：
   docs\CODEX_HANDOFF.md
   docs\ARCHITECTURE.md
 
-当前 E-mote 仍是静态近似预览，不是原版连续动画。
+v0.8：在表情/动作中选笑顔Ａ，点击“连续预览点头 · 24 FPS”。
+检查后勾选允许对话使用；演示聊天输入“请点头”测试完整链路。
+角色预览不需要任何 AI；真实聊天/声音以后可分别接 API 和 GPT-SoVITS。
+启动脚本优先使用项目 .venv；详细本机记录见 docs\V0.8_LOCAL_RELEASE.md。
+完整原生 E-mote 未实现；点头使用独立 CPU Bezier 网格预览。

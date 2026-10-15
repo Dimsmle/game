@@ -3,15 +3,16 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Character Studio v0.7 · 交接前最佳版</title>
+<title>Character Studio v0.11 · 逐句情绪对话</title>
 <link rel="stylesheet" href="/style.css">
+<link rel="stylesheet" href="/game.css">
 </head>
-<body>
+<body class="game-mode">
 <header class="topbar">
   <div class="brand"><div class="logo">C<span>✦</span></div>
-    <div><strong>Character Studio</strong><small>AMAKANO 3 · Desktop v0.7</small></div></div>
+    <div><strong>Character Studio</strong><small>Character Platform · Desktop v0.11</small></div></div>
   <div class="top-actions"><span id="engineBadge" class="pill">加载中</span>
-    <button id="refreshBtn" class="btn outline">刷新资源</button><button id="openSettings" class="btn">模型设置</button></div>
+    <button id="enterGame" class="btn outline">进入游戏模式</button><button id="refreshBtn" class="btn outline">刷新资源</button><button id="openSettings" class="btn">模型设置</button></div>
 </header>
 <main class="layout">
   <section class="panel left">
@@ -35,7 +36,7 @@
   <section class="middle">
     <section class="stage-panel">
       <div class="stage-head">
-        <div><h2>角色舞台</h2><p>支持图层组合、场景切换与模拟动作</p></div>
+        <div><h2>角色舞台</h2><p>表情、场景与实验网格点头</p></div>
         <div class="chip-group">
           <select id="stageSceneSelect" aria-label="切换已登记场景"><option value="day">白天</option><option value="night">夜晚</option></select>
           <span id="sceneChip" class="pill">day</span><span id="moodChip" class="pill">平静</span>
@@ -51,10 +52,11 @@
       </div>
       <div class="stage-wrap">
         <canvas width="960" height="540" id="stage"></canvas>
-        <div class="stage-watermark">PREVIEW · 原版 E-mote 动画尚未复现</div>
+        <div class="stage-watermark">CPU PREVIEW · 实验网格点头</div>
         <div id="stageHint" class="stage-hint">角色图片尚未加载。穿衣模型选 kan_10；在背景页绑定本地场景。</div>
       </div>
       <div class="stage-toolbar">
+        <button id="focusStage" class="mini-btn">放大舞台</button>
         <span class="section-caption">动作预览</span>
         <button data-action="idle" class="mini-btn active">待机</button>
         <button data-action="happy" class="mini-btn">开心</button>
@@ -78,8 +80,8 @@
       <div id="chatMessages" class="messages"></div>
       <form id="chatForm" class="chat-entry">
         <button type="button" id="micBtn" class="mic-btn" title="本地 Whisper 语音识别（需配置）">🎙</button>
-        <input id="chatInput" placeholder="例如：晚上好，和我聊聊天吧..." autocomplete="off" maxlength="1200">
-        <button class="send-btn" id="sendBtn" type="submit">发送 ↗</button>
+        <input id="chatInput" placeholder="例如：晚上好，和我聊聊天吧..." autocomplete="off" maxlength="1200" disabled>
+        <button class="send-btn" id="sendBtn" type="submit" disabled>发送 ↗</button>
       </form>
       <div class="chat-foot"><span id="chatStatus">就绪 · 演示模式不会调用外部模型</span><span>本地运行</span></div>
     </section>
@@ -111,6 +113,13 @@
         <button id="sampleExpressionFrame" class="mini-btn">显示此帧</button>
       </div>
       <div id="expressionStatus" class="muted small">当前是 PSB 静态采样，不是原版动态网格播放。</div>
+      <div class="background-actions">
+        <button id="previewNod" class="mini-btn" disabled>连续预览点头 · 24 FPS</button>
+        <button id="stopNod" class="mini-btn">停止预览</button>
+      </div>
+      <label class="nod-review small"><input id="reviewNod" type="checkbox" disabled>已检查当前表情的点头，允许对话使用</label>
+      <p id="nodStatus" class="muted small">实验 CPU 网格预览；首次生成需要等待，可在预览中测试说话。</p>
+      <button id="testNodMouth" class="mini-btn">预览说话口型</button>
       <div class="behavior-editor">
         <div class="section-caption">对话行为编排 · 动作标签</div>
         <p class="muted small">切到「动作时间轴」，选真实预设后，填写与对话语义对应的标签。AI 只会选择标签，不能指定任意 PSB 名称。标签保存在本机 animation_tags.json。</p>
@@ -253,32 +262,67 @@
     <div id="toast" class="toast hidden"></div>
   </section>
 </main>
+<section id="gameExperience" class="game-experience" aria-label="角色游戏舞台">
+  <div class="game-top"><div><span id="gameSceneTitle">午后的约定</span><small id="gamePlace">等待一段新的对话</small></div>
+    <button id="gameSettings" class="game-icon" aria-label="打开游戏设置">⚙</button></div>
+  <div id="gameCurtain" class="game-curtain"></div>
+  <div id="gameLoading" class="game-loading">正在准备角色画面…</div>
+  <section id="gameDialogue" class="game-dialogue" aria-label="剧情对话">
+    <div class="game-speaker"><span id="gameSpeaker">她</span><span id="gameEmotion" class="game-emotion"></span></div>
+    <div id="gameText" class="game-text" aria-live="polite">这里的每一句话，都会有相应的表情。</div>
+    <div class="game-dialogue-foot"><span id="gameHint">无语音 · 点击继续</span><button id="gameNext" disabled>继续 ▷</button></div>
+    <form id="gameChatForm" class="game-chat" hidden><input id="gameChatInput" maxlength="1200" autocomplete="off" placeholder="想和她说什么？"><button id="gameChatSend" type="submit">发送</button><button id="gameChatStop" type="button">停止</button></form>
+  </section>
+</section>
+<dialog id="gameMenu" class="game-modal" aria-labelledby="gameMenuTitle">
+  <div class="game-modal-head"><h2 id="gameMenuTitle">设置</h2><button id="closeGameMenu" class="game-icon" aria-label="关闭游戏设置">✕</button></div>
+  <div class="game-menu-actions"><button id="gameChat">自由聊天</button><button id="gameStories">体验预设对话</button><button id="gameScenes">切换场景</button><button id="gameOutfits">角色造型</button></div>
+  <label class="game-setting-row"><input id="gameShowEmotion" type="checkbox" checked>显示每句话的情绪标签</label>
+  <div class="game-menu-actions secondary"><button id="gameConnections">连接与角色设置</button><button id="gameWorkbench">开发工作台</button></div>
+  <p class="game-subtle">当前预设对话无需 AI 或语音服务。关闭设置即可回到舞台。</p>
+</dialog>
+<dialog id="gamePicker" class="game-modal" aria-labelledby="gamePickerTitle">
+  <div class="game-modal-head"><div><small id="gamePickerEyebrow">无声的小片段</small><h2 id="gamePickerTitle">今天，从哪一段开始？</h2></div><button id="closeGamePicker" class="game-icon" aria-label="关闭选择框">✕</button></div>
+  <div id="gamePickerOptions" class="game-picker-options"></div>
+  <p id="gamePickerNote" class="game-subtle">每句话都有情绪标签；点击对话框继续，在选项处决定如何回应。</p>
+</dialog>
+<dialog id="gameChoice" class="game-modal game-choice" aria-labelledby="gameChoiceTitle">
+  <small>轮到你回应了</small><h2 id="gameChoiceTitle">你想怎么回答？</h2><div id="gameChoiceOptions" class="game-picker-options"></div>
+</dialog>
 <div class="overlay hidden" id="settingsOverlay">
   <div class="settings-dialog">
     <div class="settings-head"><div><h2>本地模型与服务设置</h2><p>更改后保存；密钥使用环境变量，不保存在浏览器配置里</p></div>
       <button id="closeSettings" class="mini-btn">关闭 ✕</button></div>
     <div class="settings-grid">
-      <label>AI 模式<select id="cfgMode"><option value="demo">离线演示</option><option value="openai">OpenAI 兼容接口</option></select></label>
+      <label>AI 模式<select id="cfgMode"><option value="demo">离线演示</option><option value="deepseek">DeepSeek 官方 API</option><option value="openai">OpenAI 兼容接口</option></select></label>
       <label>LLM 接口地址<input id="cfgLlmUrl" placeholder="http://127.0.0.1:15721/v1"></label>
       <label>LLM 模型 ID<input id="cfgLlmModel" placeholder="填写代理实际支持的模型 ID"></label>
       <label>角色名字<input id="cfgRoleName" placeholder="角色"></label>
       <label class="wide">角色性格设定<textarea id="cfgPersona" rows="3"></textarea></label>
       <label class="check wide"><input type="checkbox" id="cfgMemoryLLM">允许把“已启用的长期记忆”加入 LLM 请求上下文</label>
-      <label class="check wide"><input type="checkbox" id="cfgTts">启用 GPT-SoVITS 语音</label>
+      <label class="check wide"><input type="checkbox" id="cfgTts">启用角色语音（未安装也不影响文字聊天）</label>
+      <label>语音提供者<select id="cfgTtsProvider"><option value="qwen3_tts">Qwen3-TTS Base（需另外准备模型）</option><option value="gpt_sovits">GPT-SoVITS 本地服务</option><option value="system">系统本地语音（非角色声音）</option></select></label>
+      <label>Qwen3-TTS 本地 Base 模型目录<input id="cfgQwenDir" placeholder="G:\Models\Qwen3-TTS-12Hz-1.7B-Base"></label>
       <label>GPT-SoVITS API<input id="cfgTtsUrl" placeholder="http://127.0.0.1:9880/tts"></label>
       <label>参考音频路径（在 TTS 服务器上）<input id="cfgRefAudio" placeholder="D:\Voice\reference.wav"></label>
       <label>语音输出语言<input id="cfgTextLang" value="zh" placeholder="zh / ja"></label>
       <label>参考语音语言<input id="cfgPromptLang" value="ja" placeholder="ja / zh"></label>
       <label class="wide">参考语音文本<input id="cfgPromptText" placeholder="须与 reference.wav 内容对应"></label>
-      <label class="wide">faster-whisper 本地模型目录（可选）<input id="cfgAsrPath" placeholder="D:\Models\faster-whisper-large-v3"></label>
+      <label class="check wide"><input type="checkbox" id="cfgStt">启用旧版语音识别（本阶段保持关闭，无需安装）</label>
+      <label class="wide">faster-whisper 本地模型目录（可选）<input id="cfgAsrPath" placeholder="本阶段无需填写"></label>
       <label>语音识别语言<select id="cfgAsrLang"><option value="auto">自动</option><option value="zh">中文</option><option value="ja">日语</option></select></label>
       <label>图片生成 API 地址（可选）<input id="cfgImageUrl" placeholder="https://.../v1/images/generations"></label>
       <label>图片生成模型（可选）<input id="cfgImageModel" placeholder="支持 b64_json 的图像模型 ID"></label>
       <label class="wide">PsbDecompile 导出文件夹<input id="cfgAssetsDir" placeholder="D:\Exports\kan_0"></label>
     </div>
-    <div class="settings-footer"><span>LLM_API_KEY / IMAGE_API_KEY 可在环境变量中设置</span><button id="saveSettings" class="btn">保存配置</button></div>
+    <div class="settings-footer"><span>DeepSeek 使用 DEEPSEEK_API_KEY；自定义接口使用 LLM_API_KEY。密钥仅从启动进程环境读取。</span><button id="saveSettings" class="btn">保存配置</button></div>
   </div>
 </div>
+<script src="/frame_sequence.js"></script>
+<script src="/dialogue_player.js"></script>
+<script src="/chat_stream.js"></script>
+<script src="/reply_player.js"></script>
 <script src="/app.js"></script>
+<script src="/game.js"></script>
 </body>
 </html>

@@ -47,12 +47,13 @@ def run(data_dir,asset_root=None,settings=None,model_name=""):
                        ("installed；Windows WebView2 Runtime 仍需本机启动验收" if webview else "missing"),
                        "ok" if webview else "warning"))
     ffmpeg=shutil.which("ffmpeg")
-    items.append(_item("ffmpeg","FFmpeg / 可选 ASR",bool(ffmpeg),ffmpeg or "not in PATH",
-                       "ok" if ffmpeg else "warning"))
+    stt=bool(settings.get('stt_enabled',False))
+    items.append(_item("ffmpeg","FFmpeg / 可选 ASR",bool(ffmpeg) or not stt,ffmpeg or "语音识别关闭，无需安装",
+                       "ok" if ffmpeg or not stt else "warning"))
     asr_path=str(settings.get("asr_model_path","")).strip()
     asr_ok=bool(asr_path and Path(asr_path).is_dir())
-    items.append(_item("asr","faster-whisper 模型",asr_ok,
-                       asr_path or "未配置","ok" if asr_ok else "warning"))
+    items.append(_item("asr","faster-whisper 模型",asr_ok or not stt,
+                       asr_path or "语音识别关闭，无需安装","ok" if asr_ok or not stt else "warning"))
     llm_mode=settings.get("llm_mode","demo")
     llm_ready=(llm_mode=="demo" or bool(str(settings.get("llm_model","")).strip()))
     items.append(_item("llm","LLM 配置",llm_ready,
@@ -60,7 +61,10 @@ def run(data_dir,asset_root=None,settings=None,model_name=""):
                        "ok" if llm_ready else "warning"))
     tts_enabled=bool(settings.get("tts_enabled"))
     tts_ready=(not tts_enabled) or bool(str(settings.get("tts_ref_audio","")).strip())
-    items.append(_item("tts","GPT-SoVITS 配置",tts_ready,
+    if tts_enabled and settings.get('tts_provider')=='system':tts_ready=True
+    if tts_enabled and settings.get('tts_provider')=='qwen3_tts':
+        tts_ready=tts_ready and bool(settings.get('qwen_model_dir')) and (Path(settings['qwen_model_dir'])/'config.json').is_file()
+    items.append(_item("tts","TTS 可选配置",tts_ready,
                        "未启用" if not tts_enabled else settings.get("tts_url",""),
                        "ok" if tts_ready else "warning"))
     errors=sum(x["severity"]=="error" for x in items)

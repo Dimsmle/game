@@ -85,19 +85,31 @@ v0.7 的语义情绪已扩展，不再只使用 happy/sad：
 playful, confident, grateful, serious, embarrassed, flustered, annoyed, pouting, moved,
 shocked, excited, happy_cry, dazed, wink, affectionate`
 
-## 当前“总是哭脸”的开发判断
+## “普通表情像哭脸”的实机结论（2026-10-15）
 
-JSON 证明模型本身有 `face_tears`、眉毛、特殊眼形、瞳孔、嘴形等独立控制。
-因此错误哭脸可能来自：
+真实 `kan_10` 对照已经定位并修复：`普通Ａ` 的 `face_tears=0`，并未启用真正的
+`涙追加` 图块。问题来自 `fade_*` 部件的离散帧选择规则：这些部件在 time 0 有图块，
+time 60 的 `type: 0` 是区间终止标记；旧采样器忽略终止标记，导致水滴/泡状叠层
+一直留在参数值 1.0 的普通脸上。
 
-1. `face_tears` 等变量的参数化取样错误；
-2. sprite 离散帧选择规则不完整；
-3. 眼/眉/泪水图层的 Z 顺序；
-4. E-mote mask/stencil 未实现；
-5. meshCombinator/顶点变形未实现；
-6. 特定 `Ａ/１Ａ/２Ａ` 组与当前身体/动作模型的组合关系尚未理解。
+修复后的真实画面已确认：
 
-**后续 Codex 应先做逐参数和逐图层对照，不应“永久隐藏 tears 图层”作为修复。**
+- `普通Ａ`、`笑顔Ａ` 不再出现错误水滴；
+- `泣くＡ` 的 `face_tears=1` 和真实泪水图块没有被永久隐藏；
+- 修复是通用的 `type: 0` 区间结束语义，不是针对 `kan_10` 图块编号的硬编码。
+
+## `うんうん` 连续动作探针（2026-10-15）
+
+真实时间轴时长为 118，9 个均匀采样点的 `head_UD` 数值确实变化，透明背景和
+独立说话口型也可生成；但 9 张普通帧的像素 SHA-256 完全相同，只有 **1 个**视觉帧。
+
+因此 v0.7 静态后端的结论是 `blocked_identical_frames`，保持 `playable: false`。动作依赖的头部
+mesh/clamp 变形没有被当前静态 sprite 合成器还原，不能接入 `FrameSequenceRenderer`
+冒充点头。可重复的证据由 `main_desktop.py --motion-probe "うんうん"` 生成。
+
+v0.8 新增独立 CPU Bezier 适配后，同一动作输出 49 帧、44 个不同画面，已经接入前端播放器。
+使用 `--export-nod` 可复现；不是更改上述静态探针的结果。每套模型/表情仍需独立画面验收，
+详细边界见 `V0.8_LOCAL_RELEASE.md`。
 
 ## 编号动作家族假设
 

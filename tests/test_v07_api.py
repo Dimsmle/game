@@ -3,6 +3,7 @@ import json
 import tempfile
 import unittest
 import urllib.request
+import urllib.error
 from pathlib import Path
 
 import main_desktop
@@ -42,8 +43,22 @@ class V07APITests(unittest.TestCase):
             with urllib.request.urlopen(url+"/api/health",timeout=10) as health_response:
                 health=json.load(health_response)
                 csp=health_response.headers.get("Content-Security-Policy","")
-            self.assertEqual(health["version"],"0.7.0")
+            self.assertEqual(health["version"],studio.APP_VERSION)
             self.assertIn("default-src 'self'",csp)
+            before_history=len(studio.history(200))
+            demos=get("/api/demo_scenes")
+            self.assertEqual(len(demos["scenes"]),3)
+            demo=post("/api/demo_scene",{"id":"promise"})
+            self.assertTrue(demo["silent"])
+            self.assertEqual(demo["model"],"kan_0")
+            self.assertTrue(all(node["behavior"]["expression"] for node in demo["nodes"]))
+            self.assertEqual(len(studio.history(200)),before_history)
+            with self.assertRaises(urllib.error.HTTPError) as unknown:
+                post("/api/demo_scene",{"id":"../../secret"})
+            self.assertEqual(unknown.exception.code,400)
+            for path in ("/game.js","/game.css","/dialogue_player.js"):
+                with urllib.request.urlopen(url+path,timeout=5) as asset:
+                    self.assertEqual(asset.status,200)
             runtime=get("/api/runtime")
             self.assertEqual(runtime["model"],"kan_0")
             caps=get("/api/renderer_capabilities")

@@ -1,0 +1,4 @@
+# Optional only. Not included in the normal desktop installation.
+# Install a CUDA-compatible PyTorch separately per its official Windows selector.
+qwen-tts>=0.1.0,<0.2
+soundfile>=0.13,<0.14

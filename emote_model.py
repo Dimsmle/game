@@ -16,6 +16,7 @@ from collections import Counter
 from typing import Any
 import math
 import re
+from emote_mesh import combinator_warps
 
 @dataclass
 class Sprite:
@@ -29,6 +30,7 @@ class Sprite:
     attr: int = 0
     path: str = ""
     source: str = "tex"
+    warps: tuple = ()
 
 class PoseModel:
     def __init__(self, model_path, resx_path=None):
@@ -154,20 +156,23 @@ class PoseModel:
 
     @staticmethod
     def _sample_key(frames, target, key):
-        # Sprite switching is discrete; changes to an icon/sprite apply at its keyframe.
-        # Non-owning time/key markers do not cancel an earlier icon.
-        valid=[]
-        for frame in frames:
-            content=frame.get("content")
-            if isinstance(content,dict) and key in content:
-                valid.append((float(frame.get("time",0)),content[key]))
-        if not valid:return None
+        # Sprite switching is discrete.  A type-0 frame is also meaningful: E-mote
+        # uses it as the end marker for a sprite interval.  Ignoring that marker
+        # kept fade-controlled overlays alive at parameter value 1.0 (frame 60),
+        # which is why kan_10's neutral face looked wet/tearful even though
+        # face_tears was zero.
         selected=None
-        for time,value in valid:
-            if time<=target+0.000001:
-                selected=value
-            else:
+        ordered=sorted(enumerate(frames),key=lambda item:(
+            float(item[1].get("time",0)),item[0]))
+        for _,frame in ordered:
+            time=float(frame.get("time",0))
+            if time>target+0.000001:
                 break
+            content=frame.get("content")
+            if frame.get("type")==0:
+                selected=None
+            if isinstance(content,dict) and key in content:
+                selected=content[key]
         # Critical bugfix: NEVER activate an icon from a future frame.
         # Tears are defined from frame 1; neutral frame 0 must stay blank.
         return selected
@@ -194,7 +199,7 @@ class PoseModel:
                 return tuple(v0[i]+(v1[i]-v0[i])*t for i in range(3))
         return tuple(coords[0][1])
 
-    def build_pose(self, preset=0, overrides=None, time=0):
+    def build_pose(self, preset=0, overrides=None, time=0, mesh_preview=False):
         vars=dict(self.preset_vars(preset,time))
         vars.update(overrides or {})
         self.errors=[]
@@ -202,7 +207,7 @@ class PoseModel:
         seen_count=0
         sprites=[]
         referenced=Counter()
-        def visit_motion(objname,motionname,origin,stack):
+        def visit_motion(objname,motionname,origin,stack,warps=()):
             nonlocal seen_count
             key=(objname,motionname)
             if key in stack:
@@ -214,8 +219,8 @@ class PoseModel:
                 return
             stack=stack+(key,)
             for root in motion.get("layer",[]):
-                visit_node(root,motion,origin,stack)
-        def visit_node(node,motion,parent,stack):
+                visit_node(root,motion,origin,stack,warps)
+        def visit_node(node,motion,parent,stack,warps=()):
             nonlocal seen_count
             seen_count+=1
             if seen_count>30000:
@@ -226,6 +231,10 @@ class PoseModel:
             position=tuple(parent[i]+offset[i] for i in range(3))
             src=self._sample_key(frames,t,"src")
             icon=self._sample_key(frames,t,"icon")
+            if mesh_preview:
+                warps=warps+combinator_warps(
+                    node,{"src":src,"icon":icon},position,vars,
+                    self.resx.get("ExtraFlattenArrays",{}))
             if (isinstance(src,str) and src in self.icon_groups
                     and isinstance(icon,str) and icon in self.icon_groups[src]):
                 ic=self.icon_groups[src][icon]
@@ -238,15 +247,16 @@ class PoseModel:
                            float(ic.get("width",0)),float(ic.get("height",0))),
                     origin=(float(ic.get("originX",0)),float(ic.get("originY",0))),
                     world=position,z=z,attr=int(ic.get("attr",0)),source=src,
-                    path="/".join((key[0]+":"+key[1]) for key in stack)+"/"+node.get("label","")))
+                    path="/".join((key[0]+":"+key[1]) for key in stack)+"/"+node.get("label",""),
+                    warps=warps))
                 referenced[(src,icon)]+=1
             elif isinstance(src,str) and src in self.objects:
                 if not isinstance(icon,str):
                     self._warning(f"子动画引用缺少名称：{node.get('label')}")
                 else:
-                    visit_motion(src,icon,position,stack)
+                    visit_motion(src,icon,position,stack,warps)
             for child in node.get("children",[]):
-                visit_node(child,motion,position,stack)
+                visit_node(child,motion,position,stack,warps)
         # Full-character root. The `タイムライン構造` object wraps this as its child.
         visit_motion("all_parts","全体構造",(0.0,0.0,0.0),())
         sprites.sort(key=lambda x:(x.z,x.path))

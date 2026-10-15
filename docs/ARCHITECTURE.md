@@ -1,4 +1,18 @@
-# Character Studio v0.7 — 架构说明
+# Character Studio v0.11 — 架构说明
+
+v0.11 在流式回复与原状态机之间增加 `studio/replies.py`（白名单句子列表、内存播放令牌）与
+`web/reply_player.js`（逐句准备/展示/语音/中断）。最终回复只准备计划，不提交全部动作；
+`/api/chat_segment` 按序激活当前句并保存已推进的文本前缀。见 `V0.11_SENTENCE_REPLIES.md`。
+
+v0.10 在既有模块边界内新增 `studio/llm.py` → `app.stream_chat` → `web/chat_stream.js`，
+以及 `studio/tts.py` / `tts_benchmark.py` 可选语音路径。舞台聊天的文字是暂定预览；完整 JSON
+校验和版本/取消检查通过才提交到原 `behavior` / `runtime` / SQLite。
+实施与真实验收边界见 `V0.10_AI_FOUNDATION.md`。不重写 Renderer 或记忆系统。
+
+v0.8 在原架构上新增 `emote_mesh.py` → `studio/frame_sequence.py` →
+`studio/web/frame_sequence.js` 的实验 CPU 点头链路。默认静态后端保留，已验收的
+模型/表情序列由 Renderer 适配器优先用于对话；完整原生 E-mote 仍未实现。
+具体实现、API、验收和边界见 `V0.8_LOCAL_RELEASE.md`。下文中的 v0.7 说明是原基线。
 
 ## 1. 核心原则
 

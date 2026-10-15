@@ -73,6 +73,11 @@ class BehaviorRuntime:
 
     @staticmethod
     def _hold_seconds(plan):
+        motion=plan.get("motion") or {}
+        if motion.get("playback")=="frame_sequence":
+            duration=motion.get("duration_seconds")
+            if isinstance(duration,(float,int)) and not isinstance(duration,bool) and 0<duration<=10:
+                return float(duration)
         intensity=plan.get("intensity",0.5)
         try:intensity=max(0.0,min(1.0,float(intensity)))
         except (TypeError,ValueError):intensity=0.5
@@ -193,17 +198,50 @@ class BehaviorRuntime:
         self._speech_active=False;self._revision+=1
         self._phase="reacting" if self._motion and now<self._reaction_until else "idle"
         self._record("speech_end",now,{})
+        if not self._motion and self._queue:
+            queued=self._queue.popleft()
+            priority=queued.pop("_priority",40);source=queued.pop("_source","ai")
+            return self.submit_plan(queued,source=source,priority=priority,now=now)["runtime"]
         self.tick(now)
         return self.snapshot(now)
 
-    def cancel(self,reason="cancelled",now=None):
+    def cancel(self,reason="cancelled",now=None,keep_speech=False):
         now=self._now(now)
         settle=self._settle_behavior()
-        self._revision+=1;self._phase="idle";self._speech_active=False
+        self._speech_active=bool(keep_speech and self._speech_active)
+        self._revision+=1;self._phase="speaking" if self._speech_active else "idle"
         self._motion=None;self._reaction_until=0;self._active_priority=-1
         self._active_behavior=settle;self._action_token+=1;self._queue.clear()
         self._action_tag="idle"
         self._record("cancel",now,{"reason":str(reason)[:80]})
+        return self.snapshot(now)
+
+    def motion_started(self,token,duration,now=None):
+        now=self._now(now)
+        if (isinstance(token,bool) or not isinstance(token,int)
+            or token!=self._action_token or not self._motion):
+            return self.snapshot(now)
+        duration=float(duration)
+        if not 0<duration<=10:raise ValueError("动作时长需要在 0–10 秒之间")
+        self._reaction_until=now+duration
+        self._revision+=1
+        self._record("motion_started",now,{"token":token,"seconds":duration})
+        return self.snapshot(now)
+
+    def motion_ended(self,token,now=None):
+        now=self._now(now)
+        if isinstance(token,int) and not isinstance(token,bool) and token==self._action_token and self._motion:
+            self._reaction_until=now
+            # End body motion while preserving active speech and facial emotion.
+            settle=self._settle_behavior()
+            self._motion=None;self._action_tag="idle";self._active_priority=-1
+            self._active_behavior=settle;self._action_token+=1;self._revision+=1
+            self._phase="speaking" if self._speech_active else "idle"
+            self._record("motion_ended",now,{"token":token})
+            if not self._speech_active and self._queue:
+                queued=self._queue.popleft()
+                priority=queued.pop("_priority",40);source=queued.pop("_source","ai")
+                return self.submit_plan(queued,source=source,priority=priority,now=now)["runtime"]
         return self.snapshot(now)
 
     def lock_scene(self,scene,duration=1800,now=None):

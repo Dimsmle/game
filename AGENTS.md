@@ -1,4 +1,16 @@
-# AGENTS.md — Character Studio v0.7
+# AGENTS.md — Character Studio v0.11
+
+Current dialogue work: read `docs/V0.11_SENTENCE_REPLIES.md` first. Free chat now
+supports semantic segments and ordered activation. Future sentences are never
+submitted to runtime in advance. History stores only the activated prefix, not
+the unread tail. Keep cancel/model/config/expiry guards and idempotent retries.
+
+Read `docs/V0.10_AI_FOUNDATION.md` for current AI provider implementation and honest
+validation boundaries. DeepSeek official is the preferred real provider; demo stays
+available without a key. STT is off. Do not install Whisper or a local LLM.
+No real cloud/TTS quality or latency acceptance has happened without credentials,
+authorized reference audio, and explicit model preparation. Qwen Base is optional;
+do not claim the adapter or synthetic HTTP tests prove real GPU inference works.
 
 Read in order:
 
@@ -48,6 +60,10 @@ Run:
 ```powershell
 python -m unittest discover -s tests -v
 node --check studio\web\app.js
+node tests\test_frame_sequence.js
+node tests\test_dialogue_player.js
+node tests\test_chat_stream.js
+node tests\test_reply_player.js
 python main_desktop.py --doctor
 ```
 
@@ -55,8 +71,17 @@ Windows EXE validation must run on Windows.
 
 ## Current first tasks
 
-Follow `docs/CODEX_HANDOFF.md`, beginning with the real kan_10 crying-face/rendering defect,
-then one continuous-action POC. Do not rewrite the working behavior/runtime architecture first.
+User priority changed: dialogue-appropriate per-sentence expressions and a game-only
+product UI take precedence over more animations. Read `docs/V0.9_GAME_SCENES.md` first.
+Default launch is the game stage; keep the workbench behind `--studio`/settings.
+The three authored dialogue demos are silent and do not require AI or TTS.
+
+Read `docs/V0.8_LOCAL_RELEASE.md` before continuing the older handoff.
+The fade-terminator bug is fixed; experimental CPU head_UD mesh sequences and their
+player are implemented. Do not repeat the old static-only diagnosis as the current result.
+Full native E-mote mask/physics remains unimplemented. Keep the reviewed-sequence gate.
+NativeSmoke.exe was flagged by endpoint protection: do not run, restore, whitelist,
+or bundle it. Continue using the independent Python renderer.
 
 Every completion report must state:
 - changed files

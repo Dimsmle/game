@@ -6,6 +6,7 @@ from pathlib import Path
 from PIL import Image, ImageDraw
 import math
 from emote_model import Sprite
+from emote_mesh import warp_sprite
 
 RESAMPLE=Image.Resampling.LANCZOS
 class AtlasRenderer:
@@ -74,13 +75,14 @@ class AtlasRenderer:
         canvas.alpha_composite(cropped,(l,t))
 
     def render(self, preset=0, overrides=None, size=(740,1250),
-               hidden_icons=None, adjust_origin=(0,0), zoom=1.0, time=0):
+               hidden_icons=None, adjust_origin=(0,0), zoom=1.0, time=0,
+               mesh_preview=False):
         if not isinstance(size,(list,tuple)) or len(size)!=2:
             raise ValueError("size 必须是 (宽,高)")
         W,H=int(size[0]),int(size[1])
         if not (128<=W<=2500 and 128<=H<=3500):
             raise ValueError("渲染尺寸需要在 128–2500 × 128–3500")
-        ops=self.model.build_pose(preset,overrides,time=time)
+        ops=self.model.build_pose(preset,overrides,time=time,mesh_preview=mesh_preview)
         xmin,ymin,xmax,ymax=self.reference_bounds
         padx=80;pady=90
         world_w=(xmax-xmin)+2*padx
@@ -107,6 +109,8 @@ class AtlasRenderer:
                 continue
             world_x=sprite.world[0]-sprite.origin[0]
             world_y=sprite.world[1]-sprite.origin[1]
+            if sprite.warps:
+                resized,world_x,world_y=warp_sprite(source,sprite,scale)
             screen_x=(world_x-cx)*scale+W/2
             screen_y=(world_y-cy)*scale+H/2
             self._paste_rgba(canvas,resized,screen_x,screen_y)
