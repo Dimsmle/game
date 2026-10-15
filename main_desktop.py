@@ -34,7 +34,7 @@ POSE_KEYS={
     "shy":"照れＡ",
     "sleepy":"目下閉じＡ",
 }
-RENDER_VERSION="5.2"
+RENDER_VERSION="5.4"
 POSE_SIZE=(740,1250)
 SEQUENCE_JOBS=SequenceJobs()
 
@@ -240,11 +240,12 @@ def prepare_character(root, force=False, model_name="kan_0"):
     if force or not existing:
         renderer=AtlasRenderer(model,texture)
         available_labels=model.label_to_preset
-        fallback="普通Ａ" if "普通Ａ" in available_labels else next(iter(available_labels),None)
+        fallback=next((label for label in ("普通Ａ","普通Ｂ","普通Ｃ") if label in available_labels),next(iter(available_labels),None))
         if fallback is None:
             raise ValueError(f"{model_name} 不包含可读取的表情时间轴")
         for kind,label in POSE_KEYS.items():
-            actual=label if label in available_labels else fallback
+            actual=next((label[:-1]+suffix for suffix in ('Ａ','Ｂ','Ｃ')
+                         if label[:-1]+suffix in available_labels),fallback)
             renderer.render(actual,size=POSE_SIZE).save(output[kind])
         renderer.render(fallback,overrides=model.safe_blink_override(fallback),
                         size=POSE_SIZE).save(output["blink"])

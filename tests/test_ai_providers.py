@@ -21,6 +21,15 @@ def audio_bytes():
 
 
 class TransportTests(unittest.TestCase):
+    def test_stop_finish_does_not_wait_for_done_or_socket_eof(self):
+        class Stream(io.BytesIO):
+            def readline(inner,*args):
+                if inner.tell()==len(inner.getvalue()):raise AssertionError('read after stop')
+                return super().readline(*args)
+        stream=Stream(b'data: {"choices":[{"delta":{"content":"{}"},"finish_reason":"stop"}]}\n')
+        with patch('urllib.request.OpenerDirector.open',return_value=stream):
+            self.assertEqual(list(llm.OpenAICompatibleProvider(dict(app.DEFAULT_SETTINGS,llm_mode='openai')).stream([],threading.Event())),['{}'])
+
     def test_partial_json_only_displays_speech(self):
         raw='{"speech":"你\\n好\\u4f60", "emotion":"shy"}'
         self.assertEqual(llm.speech_prefix(raw),'你\n好你')
@@ -40,7 +49,7 @@ class TransportTests(unittest.TestCase):
                 self.assertNotIn('not-a-real-secret',request.data.decode())
                 return stream
         with patch.dict(os.environ,{'DEEPSEEK_API_KEY':'not-a-real-secret'}),patch('urllib.request.build_opener',return_value=Opener()):
-            value=''.join(llm.OpenAICompatibleProvider(dict(app.DEFAULT_SETTINGS,llm_mode='deepseek')).stream([],threading.Event()))
+            value=''.join(llm.OpenAICompatibleProvider(dict(app.DEFAULT_SETTINGS,llm_mode='deepseek',llm_model='deepseek-flash')).stream([],threading.Event()))
         self.assertEqual(value,content)
 
     def test_missing_key_and_redacted_http_error(self):
@@ -87,6 +96,21 @@ class PipelineTests(unittest.TestCase):
         self.assertEqual(app.history(),[])
         app.activate_reply(result['turn_id'],0)
         self.assertEqual(len(app.history()),2)
+
+    def test_two_turns_keep_protocol_and_accept_whole_fence(self):
+        captured=[]
+        raw='```json\n'+json.dumps({'segments':[{'speech':'第一句。','emotion':'happy'},{'speech':'第二句。','emotion':'gentle'}]})+'\n```'
+        def service(provider,messages,cancel):
+            captured.append(messages)
+            yield raw
+        with patch.object(llm.OpenAICompatibleProvider,'stream',service):
+            first=list(app.stream_chat('hello','test_first_json'))[-1]['result']
+            app.activate_reply(first['turn_id'],0)
+            second=list(app.stream_chat('again','test_second_json'))[-1]['result']
+        self.assertEqual(len(second['segments']),2)
+        assistant=next(x for x in captured[1] if x['role']=='assistant')
+        self.assertEqual(json.loads(assistant['content']),{'segments':[{'speech':'第一句。'}]})
+        self.assertNotIn('第二句。',assistant['content'])
 
     def test_cancelled_or_malformed_never_commits(self):
         raw='{"speech":"你好","emotion":"happy"}'

@@ -114,7 +114,7 @@ class PoseModel:
         result=[]
         for i,preset in enumerate(self.presets):
             label=preset["label"]
-            group="face" if label.endswith("Ａ") else "motion"
+            group="face" if label.endswith(("Ａ","Ｂ","Ｃ")) else "motion"
             result.append({"label":label,"type":group,
                            "index":i,"duration":max(
                                (float(frame.get("time",0))
@@ -227,6 +227,14 @@ class PoseModel:
                 raise ValueError("层级超过安全遍历上限")
             frames=node.get("frameList",[])
             t=self._param_time(node,motion,vars)
+            # Bit 0x400 enables the opacity field on the CURRENT key. A closed
+            # eye sets its pupil reference to opa=0; traversing it drew black
+            # pupils over the closed eyelids. Later keys can disable this field.
+            mask=self._sample_key(frames,t,"mask")
+            if isinstance(mask,int) and mask & 0x400:
+                opacity=self._sample_key(frames,t,"opa")
+                if isinstance(opacity,(int,float)) and opacity<=0:
+                    return
             offset=self._sample_coord(frames,t)
             position=tuple(parent[i]+offset[i] for i in range(3))
             src=self._sample_key(frames,t,"src")

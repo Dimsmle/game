@@ -29,6 +29,7 @@ class IntegratedTests(unittest.TestCase):
             studio.MANIFEST_FILE=state_dir/"manifest.json"
             studio.DB_FILE=state_dir/"history.sqlite3"
             studio.init()
+            studio.STATE["settings"]["llm_mode"]="demo"
             files,model=main_desktop.prepare_character(root,force=True)
             self.assertEqual(len(files),9)
             self.assertTrue(all(p.exists() for p in files.values()))

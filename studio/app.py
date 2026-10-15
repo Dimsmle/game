@@ -32,7 +32,7 @@ import webbrowser
 
 from studio import backgrounds, behavior, runtime as behavior_runtime, renderers, diagnostics, model_meta
 from studio import replies
-
+os.environ["DEEPSEEK_API_KEY"] = "sk-9f8b53701a73428cb6bc1631ea11ba56"
 ROOT = Path(__file__).resolve().parent
 WEB = ROOT / "web"
 DATA = ROOT / "data"
@@ -47,12 +47,12 @@ APP_VERSION="0.11.0"
 
 DEFAULT_SETTINGS = {
     "assets_dir":"",
-    "llm_mode":"demo",
-    "llm_url":"https://api.deepseek.com",
-    "llm_model":"deepseek-flash",
+    "llm_mode":"deepseek",
+    "llm_url":"https://api.deepseek.com/v1/chat/completions",
+    "llm_model":"deepseek-v4-flash",
     "role_name":"角色",
     "character_model":"",
-    "persona":"温柔、自然地交谈，简短回答；在用户需要时主动关心，但不假装现实中的身体接触。",
+    "persona":"温柔、自然地交谈，简短回答；在用户需要时主动关心",
     "tts_enabled":False,
     "tts_provider":"gpt_sovits",
     "qwen_model_dir":"",
@@ -665,12 +665,12 @@ def stream_chat(user_text,request_id,segmented=True):
             validate_api_url(settings["llm_url"])
             scenes=[k for k,v in STATE["manifest"].get("scenes",{}).items() if v]
             prompt=("你是具有固定性格的虚拟角色。用中文自然交谈，回复一到三句。"
-                +behavior.llm_instructions(scenes,RUNTIME.context_hint())
+                +behavior.llm_instructions(scenes,RUNTIME.context_hint(),segmented=segmented)
                 +(replies.instructions() if segmented else '\n请先输出 speech 字段。')
                 +"你的名字："+settings["role_name"][:100]+"；性格："+settings["persona"][:1000])
             if settings.get("memory_enabled_for_llm",True):prompt+='\n'+memory_context()
             messages=[{"role":"system","content":prompt}]
-            messages.extend({"role":x["role"],"content":x["content"]} for x in history(12) if x["role"] in ("user","assistant"))
+            messages.extend(replies.history_message(x,segmented) for x in history(12) if x["role"] in ("user","assistant"))
             messages.append({"role":"user","content":user_text})
             raw="";visible=""
             for piece in OpenAICompatibleProvider(settings).stream(messages,job["cancel"]):
@@ -680,8 +680,10 @@ def stream_chat(user_text,request_id,segmented=True):
                 if preview!=visible:
                     if first is None:first=round((time.monotonic()-began)*1000)
                     visible=preview;yield {"type":"text","text":preview}
-        try:intent=json.loads(raw)
-        except ValueError:raise RuntimeError("模型未返回有效 JSON；没有执行行为或保存本轮，可重试") from None
+        try:intent=replies.parse_reply(raw)
+        except ValueError as exc:
+            app_log('llm.invalid_json',json.dumps({'characters':len(raw),'position':getattr(exc,'pos',None),'empty':not bool(raw.strip())}))
+            raise RuntimeError("模型未返回有效 JSON；没有执行行为或保存本轮，可重试") from None
         scenes=[k for k,v in STATE['manifest'].get('scenes',{}).items() if v]
         segments=replies.normalize_segments(intent,scenes)
         if not segmented:segments=[{**segments[0],'speech':'\n'.join(item['speech'] for item in segments)}]

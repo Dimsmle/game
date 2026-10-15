@@ -27,6 +27,7 @@ class BehaviorHTTPTests(unittest.TestCase):
             studio.MANIFEST_FILE=settings_dir/"manifest.json"
             studio.DB_FILE=settings_dir/"history.sqlite3"
             studio.init()
+            studio.STATE["settings"]["llm_mode"]="demo"
             studio.STATE["settings"]["assets_dir"]=str(root)
             studio.STATE["settings"]["character_model"]="kan_0"
             server,_=main_desktop.start_server(0,root)

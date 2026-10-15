@@ -41,7 +41,7 @@ class SequenceAPITests(unittest.TestCase):
             app.DATA=root/"qa";app.GEN=app.DATA/"generated"
             app.SETTINGS_FILE=app.DATA/"settings.json";app.MANIFEST_FILE=app.DATA/"manifest.json"
             app.DB_FILE=app.DATA/"history.sqlite3";app.init()
-            app.STATE["settings"].update(assets_dir=str(root),character_model="kan_0")
+            app.STATE["settings"].update(assets_dir=str(root),character_model="kan_0",llm_mode="demo")
             main.SEQUENCE_JOBS=SequenceJobs()
             server,_=main.start_server(0,root)
             url=f"http://127.0.0.1:{server.server_port}"

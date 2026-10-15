@@ -32,6 +32,10 @@ document.body.classList.toggle("game-mode",gameMode);
 let backgroundItems=[],selectedBgRef="",previewBackgroundRef="",lastAutoSceneSlot="";
 let timelineCatalog=[],timelineGroup="face",activeExpression=null,expressionRequest=0;
 let nodSequence=null,nodRuntimeToken=null,nodMouthUntil=0;
+let textMouthUntil=0;
+function mouthOpen(t=performance.now()){
+ return playing?volume>.018:(t<textMouthUntil&&Math.floor(t/110)%2===0);
+}
 const sequenceRenderer=new FrameSequenceRenderer(ref=>new Promise((resolve,reject)=>{
  const image=new Image();image.onload=()=>resolve(image);
  image.onerror=()=>reject(Error("动作帧加载失败"));image.src=fileURL(ref);
@@ -285,14 +289,14 @@ function layerVisible(l,t){
  const blink=(t%4200)<130;
  if(l.slot==="eyes_open")return !blink;
  if(l.slot==="eyes_closed")return blink;
- if(l.slot==="mouth_open")return playing&&volume>.015;
- if(l.slot==="mouth_closed")return !playing||volume<=.015;
+ if(l.slot==="mouth_open")return mouthOpen();
+ if(l.slot==="mouth_closed")return !mouthOpen();
  if(l.slot==="happy")return mood==="happy";
  return true;
 }
 function drawStage(t){
  const sequenceImage=sequenceRenderer.update({
-   talk:(playing&&volume>.018)||t<nodMouthUntil,blink:(t%4200)<155});
+   talk:mouthOpen(t)||t<nodMouthUntil,blink:(t%4200)<155});
  paintBackground(t);
  const activeBackground=gameMode&&gameBackdrop?manifest.scenes[gameBackdrop]:(previewBackgroundRef||manifest.scenes[scene]);
  const bg=activeBackground?resourceImage(activeBackground):null;
@@ -311,9 +315,9 @@ function drawStage(t){
   const expressionRefs=(isAuto && activeExpression) ? activeExpression.refs : null;
   const poseRef=isAuto
     ? (expressionRefs
-       ? (playing && volume>.018 ? expressionRefs.talk :
+       ? (mouthOpen(t) ? expressionRefs.talk :
           isBlink ? expressionRefs.blink : expressionRefs.normal)
-       : (playing && volume>.018 && manifest.poses.talk
+       : (mouthOpen(t) && manifest.poses.talk
          ? manifest.poses.talk
          : isBlink && manifest.poses.blink
              ? manifest.poses.blink
@@ -1451,6 +1455,7 @@ window.GameBridge={
  prepareSegment:segment=>loadGameExpression(segment.behavior),
  async cancelChat(){await chatStream.cancel();},
  speak,
+ textSpeech(active){textMouthUntil=active?performance.now()+180:0;},
  async applyChat(result,isCurrent){
   if(!isCurrent())return;
   const rendered=await loadGameExpression(result.behavior);
@@ -1468,7 +1473,7 @@ window.GameBridge={
   activeExpression=rendered;setMood(plan.emotion);setAction("idle");
  },
  warm:plan=>loadGameExpression(plan).catch(()=>null),
- async stopSpeech(){await $("cancelRuntime").onclick();},
+ async stopSpeech(){textMouthUntil=0;await $("cancelRuntime").onclick();},
  location(slot){
   gameBackdrop=slot;
   const available=Object.keys(manifest.scenes);

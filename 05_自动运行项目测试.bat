@@ -10,4 +10,5 @@ node --check studio\web\chat_stream.js
 node tests\test_chat_stream.js
 node --check studio\web\reply_player.js
 node tests\test_reply_player.js
+node tests\test_game_text.js
 pause

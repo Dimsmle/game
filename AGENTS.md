@@ -1,5 +1,11 @@
 # AGENTS.md — Character Studio v0.11
 
+Latest fixes: read `docs/V0.11_DIALOGUE_AND_SHI_FIXES.md`. Assets are organized
+under `characters/<code>/<model>_decompiled`; recursive discovery remains supported.
+Face suffixes A/B/C (full-width) are actual preset labels, NOT outfit-number rules.
+Keep opacity mask bit 0x400: opa=0 suppresses the whole referenced pupil subtree.
+Add `node tests/test_game_text.js` to the required JS regressions.
+
 Current dialogue work: read `docs/V0.11_SENTENCE_REPLIES.md` first. Free chat now
 supports semantic segments and ordered activation. Future sentences are never
 submitted to runtime in advance. History stores only the activated prefix, not

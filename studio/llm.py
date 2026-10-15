@@ -92,6 +92,7 @@ class OpenAICompatibleProvider:
                         if reason:
                             if reason!='stop':raise RuntimeError('模型输出被截断或过滤，请重试')
                             finished=True
+                            break
                     if cancel.is_set():raise Cancelled('已停止本轮对话')
                     if not finished:raise RuntimeError('模型连接提前结束，未执行本轮行为')
                     return

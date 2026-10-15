@@ -177,9 +177,10 @@ def _choose_expression(emotion,catalog,custom):
     if override in faces:
         return override
     for label in EMOTION_TO_PRESETS.get(emotion,EMOTION_TO_PRESETS["neutral"]):
-        if label in faces:
-            return label
-    return "普通Ａ" if "普通Ａ" in faces else (next(iter(sorted(faces)),None))
+        for suffix in ('Ａ','Ｂ','Ｃ'):
+            candidate=label[:-1]+suffix
+            if candidate in faces:return candidate
+    return next((label for label in ('普通Ａ','普通Ｂ','普通Ｃ') if label in faces),next(iter(sorted(faces)),None))
 
 def _choose_motion(action,catalog):
     if action in ("idle",):
@@ -315,12 +316,14 @@ def resolve_behavior(intent,model_name,catalog,library,valid_scenes):
         "warnings":warnings,
     }
 
-def llm_instructions(scene_ids,runtime_hint=''):
+def llm_instructions(scene_ids,runtime_hint='',segmented=False):
     emotions=", ".join(EMOTION_TO_PRESETS.keys())
     actions=", ".join(ACTION_TAGS)
     places=", ".join(scene_ids) if scene_ids else "(none)"
+    header=("只输出一个有效 JSON 对象，不要 Markdown。每个 segments 段落必须有字段 " if segmented else
+            "只输出一个有效 JSON 对象，不要 Markdown。必须有字段 ")
     return (
-        "只输出一个有效 JSON 对象，不要 Markdown。必须有字段 "
+        header+
         "speech（自然中文回复）, emotion, action_tag, scene, intensity, voice_style。\n"
         "voice_style 只能是 normal/soft/cheerful/calm/sad；不能指定声音文件。\n"
         "emotion（你推断回复时人物面部的情绪）必须取自："+emotions+"。\n"

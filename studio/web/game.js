@@ -5,6 +5,7 @@
  const bridge=window.GameBridge;
  let scenarios=[],selectedStory=null,currentNode=null,textTimer=null,shown=0,typingText="";
  let warmGeneration=0,ready=false,chatMode=false,chatGeneration=0,chatBusy=false;
+ let revealStream=false;
  const picker=el("gamePicker"),menu=el("gameMenu"),choice=el("gameChoice");
  const request=async(path,data)=>{
   const response=await fetch(path,data===undefined?{}:{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(data)});
@@ -12,15 +13,31 @@
  };
  function showDialog(dialog){if(!dialog.open)dialog.showModal();}
  function closeDialogs(){for(const dialog of [picker,menu,choice])if(dialog.open)dialog.close();}
- function setBusy(value){el("gameLoading").classList.toggle("visible",value);}
+ function setBusy(value){
+  // Keep the previous face visible; preparation must not cover the stage.
+  el("gameLoading").classList.remove("visible");
+  el("gameDialogue").setAttribute("aria-busy",String(value));
+  if(value){clearInterval(textTimer);bridge.textSpeech(false);}
+ }
  function showText(full){
   clearInterval(textTimer);typingText=full;shown=0;el("gameText").textContent="";
   textTimer=setInterval(()=>{
    shown=Math.min(full.length,shown+1);el("gameText").textContent=full.slice(0,shown);
+   bridge.textSpeech(shown<full.length);
    if(shown===full.length)clearInterval(textTimer);
   },27);
  }
- function finishText(){clearInterval(textTimer);shown=typingText.length;el("gameText").textContent=typingText;}
+ function finishText(){clearInterval(textTimer);bridge.textSpeech(false);shown=typingText.length;el("gameText").textContent=typingText;}
+ function streamText(preview){
+  if(!preview.startsWith(typingText)){shown=0;el("gameText").textContent="";}
+  typingText=preview;
+  if(revealStream){finishText();return;}
+  clearInterval(textTimer);
+  textTimer=setInterval(()=>{
+   if(shown<typingText.length){shown++;el("gameText").textContent=typingText.slice(0,shown);bridge.textSpeech(true);}
+   else {clearInterval(textTimer);bridge.textSpeech(false);}
+  },27);
+ }
  function setOptions(container,options){
   container.replaceChildren();
   for(const item of options){
@@ -90,6 +107,7 @@
  });
  async function advance(){
   if(chatMode){
+   if(chatBusy&&!replyPlayer.turn){revealStream=true;finishText();return;}
    if(replyPlayer.loading)return;
    if((!replyPlayer.error||replyPlayer.error.voice)&&shown<typingText.length){finishText();return;}
    await replyPlayer.next();return;
@@ -192,6 +210,7 @@
  async function stopChat(){
   replyPlayer.stop();setBusy(false);el("gameNext").hidden=chatMode;
   clearInterval(textTimer);
+  bridge.textSpeech(false);
   ++chatGeneration;chatBusy=false;el("gameChatSend").disabled=false;
   await Promise.all([bridge.cancelChat(),bridge.stopSpeech()]);
  }
@@ -212,6 +231,7 @@
  el("gameChatForm").onsubmit=async event=>{
   event.preventDefault();const text=el("gameChatInput").value.trim();if(!text||chatBusy)return;
   chatBusy=true;const generation=++chatGeneration;
+  revealStream=false;typingText="";shown=0;
   replyPlayer.stop();clearInterval(textTimer);el("gameNext").hidden=true;
   el("gameChatSend").disabled=true;
   await Promise.all([bridge.cancelChat(),bridge.stopSpeech()]);
@@ -221,10 +241,10 @@
   el("gameText").textContent="…";el("gameEmotion").textContent="";
   el("gameHint").textContent="你："+text;
   try{
-   const result=await bridge.chat(text,preview=>{if(current())el("gameText").textContent=preview;});
+   const result=await bridge.chat(text,preview=>{if(current())streamText(preview);});
    if(!result||!current())return;
    await replyPlayer.start(result);
-  }catch(error){if(current()){el("gameText").textContent=error.message;el("gameHint").textContent="文字聊天可继续；请检查连接设置后重试";el("gameChatInput").value=text;}}
+  }catch(error){if(current()){clearInterval(textTimer);bridge.textSpeech(false);el("gameText").textContent=error.message;el("gameHint").textContent="文字聊天可继续；请检查连接设置后重试";el("gameChatInput").value=text;}}
   finally{if(current()){chatBusy=false;el("gameChatSend").disabled=false;el("gameChatInput").focus();}}
  };
  el("closeGameMenu").onclick=()=>menu.close();

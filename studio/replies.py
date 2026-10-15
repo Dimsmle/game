@@ -1,9 +1,32 @@
 """Validated per-sentence intents and an ephemeral, ordered playback capability."""
 from copy import deepcopy
+import json
+import re
 import secrets
 import time
 
 from . import behavior
+
+
+def parse_reply(raw):
+    """Accept only a complete JSON document, optionally a whole Markdown fence.
+
+    Never guess missing braces or extract executable intentions from prose.
+    """
+    text=raw.strip().lstrip('\ufeff')
+    fence=re.fullmatch(r'```(?:json)?\s*\n?(.*?)\n?```',text,re.S|re.I)
+    if fence:text=fence.group(1).strip()
+    return json.loads(text)
+
+
+def history_message(row,segmented=True):
+    text=row['content']
+    if row['role']=='assistant':
+        # SQLite keeps read text, not raw provider JSON. Preserve the protocol
+        # in model context too, without inventing historical behavior labels.
+        value={'segments':[{'speech':text}]} if segmented else {'speech':text}
+        text=json.dumps(value,ensure_ascii=False)
+    return {'role':row['role'],'content':text}
 
 
 def normalize_segments(value,scenes):
