@@ -1,5 +1,11 @@
 # Character Studio v0.11 — 架构说明
 
+v0.14.1 P1.5 增量：`roleplay_plus/store.py` 在同一 SQLite 新增 rp_* 表，
+角色卡/玩家身份/预设按主存档绑定；`bridge.py` 投影只读 GameStore 状态，
+`composer.py` 作为两条模型请求路径共用的角色上下文组合器。原 JSON 行为协议保留，
+不允许角色卡直接提交事件或属性。设定 epoch 加入 ReplyTurn 快照，HTTP 编辑与句子
+激活使用同一 CHAT_LOCK/LOCK，防止旧结果落地。详见 ROLEPLAY_ENGINE.md。
+
 v0.12 P1 增量：`game_db.py` 负责原 SQLite 的备份、user_version 迁移、档案与状态事务；
 `game_state.py` 负责强类型属性规则和紧凑可信上下文。`app.py` 仍使用原 ReplyTurn，
 仅在其 settings 快照加入档案 generation 与状态 revision，防止跨档案旧回复落地。

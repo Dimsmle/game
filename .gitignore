@@ -16,4 +16,8 @@ character_exports/
 local_secrets.json
 local_secrets.*
 !local_secrets.example.json
-
+!.env.example
+**/local_secrets.json
+.roleplay_install_backups/
+**/__pycache__/
+*.pyc

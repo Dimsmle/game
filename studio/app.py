@@ -32,6 +32,7 @@ import webbrowser
 
 from studio import backgrounds, behavior, runtime as behavior_runtime, renderers, diagnostics, model_meta
 from studio import replies
+from studio.roleplay_plus import bridge as roleplay_bridge
 ROOT = Path(__file__).resolve().parent
 WEB = ROOT / "web"
 DATA = ROOT / "data"
@@ -42,7 +43,7 @@ SETTINGS_FILE = DATA / "settings.json"
 MANIFEST_FILE = DATA / "manifest.json"
 DB_FILE = DATA / "history.sqlite3"
 MAX_BODY = 24 * 1024 * 1024
-APP_VERSION="0.12.0-p1"
+APP_VERSION="0.14.1-p15"
 
 DEFAULT_SETTINGS = {
     "assets_dir":"",
@@ -199,6 +200,7 @@ def init():
     app_log("app.init",f"version={APP_VERSION} model={settings.get('character_model','') or '(none)'}")
     from .game_db import migrate
     migrate(DB_FILE)
+    roleplay_bridge.initialize(DB_FILE, settings, use_existing_game_state=True)
     return STATE
 
 
@@ -210,7 +212,8 @@ def game_store():
 def chat_settings():
     """Bind existing ReplyTurn snapshot guards to profile ID AND ABA epoch."""
     session,state=game_store().snapshot()
-    return dict(STATE['settings'],_game_session=session,_game_state=state)
+    return dict(STATE['settings'],_game_session=session,_game_state=state,
+                _roleplay_epoch=roleplay_bridge.epoch())
 
 
 def select_game_profile(profile_id):
@@ -587,7 +590,6 @@ def parse_reply(value):
     return planned_reply(value)
 
 def chat_response(user_text):
-    from .persona import context as persona_context
     from .game_state import prompt_context
     with CHAT_LOCK:
         REPLY_TURN.clear()
@@ -615,11 +617,12 @@ def chat_response(user_text):
         prompt=(
             "你是一个具有固定性格的本地虚拟角色。"
             "用中文自然对话，尽量用一至三句话。\n"
-            +persona_context(settings)
+            +"\n【人物核心以当前 Roleplay 角色卡为准；遵守原有输出协议。】"
             +prompt_context(settings['_game_state'])
             +behavior.llm_instructions(scenes,RUNTIME.context_hint())
             +(("\n"+mem_context) if mem_context else "")
         )
+        prompt=roleplay_bridge.extend_prompt(prompt,settings,user_text,history(6,profile_id))
         conversation=[{"role":"system","content":prompt}]
         for item in history(12,profile_id):
             if item["role"] in ("user","assistant"):
@@ -678,7 +681,6 @@ def stream_chat(user_text,request_id,segmented=True):
     """Preview text streams; only a completed, current JSON reply can act/commit."""
     global ACTIVE_CHAT,LLM_METRICS
     from .llm import OpenAICompatibleProvider,Cancelled,speech_prefix
-    from .persona import context as persona_context
     from .game_state import prompt_context
     began=time.monotonic(); first=None
     job={"id":request_id,"cancel":threading.Event()}
@@ -697,11 +699,12 @@ def stream_chat(user_text,request_id,segmented=True):
             validate_api_url(settings["llm_url"])
             scenes=[k for k,v in STATE["manifest"].get("scenes",{}).items() if v]
             prompt=("你是具有固定性格的虚拟角色。用中文自然交谈，回复一到三句。"
-                +persona_context(settings)
+                +"\n【人物核心以当前 Roleplay 角色卡为准；遵守原有输出协议。】"
                 +prompt_context(settings['_game_state'])
                 +behavior.llm_instructions(scenes,RUNTIME.context_hint(),segmented=segmented)
                 +(replies.instructions() if segmented else '\n请先输出 speech 字段。'))
             if settings.get("memory_enabled_for_llm",True):prompt+='\n'+memory_context(profile_id=settings['_game_session']['profile_id'])
+            prompt=roleplay_bridge.extend_prompt(prompt,settings,user_text,history(6,settings["_game_session"]["profile_id"]))
             messages=[{"role":"system","content":prompt}]
             messages.extend(replies.history_message(x,segmented) for x in history(12,settings['_game_session']['profile_id']) if x["role"] in ("user","assistant"))
             messages.append({"role":"user","content":user_text})
@@ -945,6 +948,7 @@ class Handler(BaseHTTPRequestHandler):
         path=route.path
         query=urllib.parse.parse_qs(route.query)
         try:
+            if roleplay_bridge.try_get(self,path,query):return
             if path=="/":
                 return self.static(WEB/"index.html","text/html; charset=utf-8")
             if path in ("/style.css","/app.js","/frame_sequence.js","/dialogue_player.js","/chat_stream.js","/reply_player.js","/game.js","/game.css","/game_state_hud.js"):
@@ -997,7 +1001,8 @@ class Handler(BaseHTTPRequestHandler):
             if path=="/api/state":
                 with CHAT_LOCK:
                     value={"settings":STATE["settings"],"manifest":STATE["manifest"],
-                           "history":history(30),"memories":memories(80)}
+                           "history":history(30),"memories":memories(80),
+                           "roleplay":roleplay_bridge.identity()}
                 return self.reply(200,value)
             if path=="/api/assets":
                 return self.reply(200,{"items":scan_assets(),"configured":asset_root() is not None})
@@ -1070,6 +1075,15 @@ class Handler(BaseHTTPRequestHandler):
             obj=json.loads(raw)
             if not isinstance(obj,dict):
                 raise ValueError("请求体必须是对象")
+            if path.startswith('/api/roleplay/'):
+                # Serialize RP edits with generation acceptance and sentence activation.
+                with CHAT_LOCK,LOCK:
+                    before=roleplay_bridge.epoch()
+                    handled=roleplay_bridge.try_post(self,path,obj)
+                    if roleplay_bridge.epoch()!=before:
+                        if ACTIVE_CHAT:ACTIVE_CHAT['cancel'].set()
+                        REPLY_TURN.clear()
+                    if handled:return
             if path=="/api/game/profile":
                 action=obj.get('action')
                 if action=='create' and set(obj)=={'action','id','display_name'}:

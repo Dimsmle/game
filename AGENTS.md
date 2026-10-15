@@ -1,4 +1,4 @@
-# AGENTS.md — Character Studio v0.12 P1
+# AGENTS.md — Character Studio v0.14.1 P1.5
 
 Credentials: read `docs/SETTINGS_AND_SECRETS.md`. Use studio.credentials.get_api_key,
 never set a literal key in app.py or merge private credentials into public settings.
@@ -7,9 +7,12 @@ Environment overrides the private file; tests must explicitly isolate that file.
 
 P0/P1 prerequisites for v0.13 are implemented. Read `docs/V0.12_P0_P1_REPORT.md`,
 `docs/GAME_STATE_SCHEMA.md` and `docs/AI_EVENT_SYSTEM.md` before further work.
-NEXT is P1.5a (CharacterCard, player Persona, six narrative presets), then P1.5b
-(Lorebook and a single PromptComposer). Neither v0.13 phase is implemented yet.
-Do not repeat P1 or jump to background/CG/touch/event execution.
+P1.5 is now integrated as studio/roleplay_plus: cards, separate player Persona,
+six presets, conditional Lorebook and PromptComposer. Read docs/ROLEPLAY_ENGINE.md
+and docs/V0.14.1_MERGE_REPORT.md. Legacy settings.persona migrates only once;
+the active RP card owns identity, while the main GameStore owns all gameplay state.
+RP HTTP mutations must hold CHAT_LOCK/LOCK with ReplyTurn acceptance/activation.
+Do not repeat P1/P1.5 or jump to background/CG/touch/event execution.
 
 GameState uses the existing history.sqlite3, user_version=1, with SQLite backup
 before migration. Existing messages/memories belong to profile 'default'; all

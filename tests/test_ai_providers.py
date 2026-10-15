@@ -85,6 +85,11 @@ class PipelineTests(unittest.TestCase):
         card='日常角色资料。'*230+'末尾约束：不要替用户做决定。'
         self.assertGreater(len(card),1000)
         app.STATE['settings'].update(app.validate_settings({'persona':card,'role_name':'测试角色'}))
+        # Roleplay cards now own live identity; legacy settings migrate only once.
+        from studio.roleplay_plus import bridge
+        current=bridge.store().get_card('legacy_character')
+        current['data'].update(description=card,name='测试角色')
+        bridge.store().save_card(current['data'],current['revision'])
         captured=[]
         def service(provider,messages,cancel):
             captured.append(messages)

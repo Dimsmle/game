@@ -1,8 +1,10 @@
-# Character Studio v0.12 P1
+# Character Studio v0.14.1 P1.5
 
-本轮先补齐 v0.13 的前置任务：SQLite 备份／迁移、多档案游戏状态、可折叠 HUD，
-启动直接进入自由聊天。详见 [P0/P1 实际验收记录](docs/V0.12_P0_P1_REPORT.md)。
-v0.13 的角色卡、玩家 Persona、六种叙事预设、世界书和 PromptComposer 尚待分轮实施。
+已增量合并角色卡、独立玩家 Persona、六种叙事预设、条件世界书与 PromptComposer。
+右上角「✦ 角色设定」进入编辑工作台，返回角色舞台继续自由聊天。
+旧人设只在首次启动迁入角色卡，之后请在角色卡编辑，不再修改旧模型设置中的人设。
+详见 [角色扮演使用说明](docs/ROLEPLAY_ENGINE.md)、[本次合并验收](docs/V0.14.1_MERGE_REPORT.md)。
+原有 [P0/P1 存档与状态系统](docs/V0.12_P0_P1_REPORT.md)、密钥管理、逐句表情和 Renderer 保留。
 
 右上角“关系与心情”可展开数值、新建／切换存档和备份。正式数据库将在下次启动时
 先备份再增量迁移；原有聊天与记忆保留在“原有存档”。设置可隐藏 HUD。

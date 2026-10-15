@@ -32,6 +32,7 @@ def main():
         "--noconfirm","--clean","--onedir","--windowed",
         "--name","CharacterStudio",
         "--add-data",str(web)+os.pathsep+"studio/web",
+        "--add-data",str(ROOT/"studio"/"roleplay_plus"/"web")+os.pathsep+"studio/roleplay_plus/web",
         "--collect-all","webview",
         "--hidden-import","webview.platforms.winforms",
         str(ROOT/"main_desktop.py"),

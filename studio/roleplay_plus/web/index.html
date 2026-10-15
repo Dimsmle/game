@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>Character Studio · 角色扮演工作台</title>
+<link rel="stylesheet" href="/roleplay/style.css">
+<script defer src="/roleplay/main.js"></script>
+</head>
+<body>
+<header class="top">
+  <div class="brand"><span class="brand-icon">✦</span><div><strong>Character Studio</strong><small>ROLEPLAY · v0.14.1 本地集成</small></div></div>
+  <div class="top-actions"><span id="health" class="status">正在连接本地引擎…</span><a class="go-back" href="/">← 返回角色舞台</a></div>
+</header>
+<div class="shell">
+<aside class="sidebar" aria-label="角色管理导航">
+  <div class="sidebar-title">创作工作台</div>
+  <button class="nav active" data-tab="overview">◈　总览与关系</button>
+  <button class="nav" data-tab="character">♢　角色卡</button>
+  <button class="nav" data-tab="persona">◉　玩家人设</button>
+  <button class="nav" data-tab="presets">☷　叙事预设</button>
+  <button class="nav" data-tab="lore">▧　世界书 Lorebook</button>
+  <button class="nav" data-tab="inspector">⌘　Prompt 检查器</button>
+  <div class="sidebar-help">
+    <span class="help-label">开发提示</span>
+    <p>这里编辑的是 AI 的叙事与规则数据，不包含原游戏素材。所有更改保存在本机 SQLite。</p>
+    <p>预设调整会影响后续 DeepSeek 回复，不会重写已有聊天历史。</p>
+  </div>
+</aside>
+<main class="content">
+<section class="pane active" id="tab-overview">
+  <div class="eyebrow">GAME STATE · CURRENT PROFILE</div>
+  <h1>角色状态总览</h1>
+  <p class="lead">角色的性格来自角色卡；好感度、心情、信任与精力由本地养成规则持久管理。</p>
+  <div id="stats" class="stat-grid" aria-label="角色养成属性"></div>
+  <div class="layout-split">
+    <div class="surface">
+      <h2>当前会话配置</h2>
+      <dl id="binding-details" class="details"></dl>
+      <p class="muted">这里的状态只用于文本与事件规则；完整原版背景、CG 和触摸交互由后续阶段接入。</p>
+    </div>
+    <div class="surface">
+      <h2>可验证的日常互动演示</h2>
+      <p class="muted">这些是本地规则审核过的示例事件，不是 DeepSeek 自动生成的原作剧情。选择“好呀”以后才改变数值。</p>
+      <div id="events" class="event-list"></div>
+      <div id="event-choice" class="choice-box" hidden></div>
+    </div>
+  </div>
+  <div class="surface">
+    <h2>最近的实际事件</h2>
+    <div id="journal" class="list-rows muted">暂无事件</div>
+  </div>
+</section>
+
+<section class="pane" id="tab-character">
+  <div class="eyebrow">IDENTITY · CHARACTER CARD</div>
+  <h1>可编辑角色卡</h1>
+  <p class="lead">修改人物核心性格、偏好、说话风格和示例语气；旧项目的 <code>settings.persona</code> 会在首次启动时作为角色设定导入，而不是玩家身份。</p>
+  <div class="surface form-panel">
+    <div class="toolbar"><label>角色卡 <select id="card-select"></select></label><button class="secondary" id="card-new">+ 新建人物</button><button id="card-activate">设为当前角色</button></div>
+    <div class="two-cols"><label>角色卡 ID<input id="card-id" autocomplete="off" placeholder="my_character" maxlength="64"></label>
+      <label>角色名称<input id="card-name" autocomplete="off" maxlength="80"></label></div>
+    <label>角色介绍<textarea id="card-description" rows="3" placeholder="人物经历、长处、习惯和基本背景"></textarea></label>
+    <div class="two-cols">
+      <label>核心性格（每行一项）<textarea id="card-traits" rows="5"></textarea></label>
+      <label>行为原则（每行一项）<textarea id="card-values" rows="5"></textarea></label>
+    </div>
+    <label>说话方式<textarea id="card-speech" rows="3" placeholder="词汇、节奏、口癖控制、情绪描写"></textarea></label>
+    <div class="two-cols"><label>喜欢的事（每行一项）<textarea id="card-likes" rows="3"></textarea></label><label>不喜欢的事（每行一项）<textarea id="card-dislikes" rows="3"></textarea></label></div>
+    <label>长期动机（每行一项）<textarea id="card-motivations" rows="3"></textarea></label>
+    <div class="two-cols">
+      <label>已核实原作事实（每行一项）<textarea id="card-canon" rows="4" placeholder="没有经过素材/原作验证，请留空"></textarea></label>
+      <label>自创演绎设定（每行一项）<textarea id="card-fanon" rows="4" placeholder="与原作资料明确区分"></textarea></label>
+    </div>
+    <label>说话示例（每行：玩家说的话 | 角色如何回应）<textarea id="card-examples" rows="5" placeholder="今天好累 | 那今天就稍微休息一下吧。"></textarea></label>
+    <div class="two-cols">
+      <label>设定来源备注<input id="card-source" maxlength="500"></label>
+      <label class="inline-check"><input id="card-verified" type="checkbox"> 原作事实已经人工核实</label>
+    </div>
+    <div class="footer-bar"><span id="card-revision" class="muted">尚未加载</span><button id="card-save">保存角色卡</button></div>
+  </div>
+</section>
+
+<section class="pane" id="tab-persona">
+  <div class="eyebrow">PLAYER PERSONA · OPTIONAL</div>
+  <h1>玩家身份与隐私</h1>
+  <p class="lead">这里描述的是“你在游戏里的身份”，不是角色千岁的性格。即使保存了个人设定，也只有主动开启共享后才会发送给云端模型。</p>
+  <div class="surface form-panel">
+    <div class="toolbar"><label>人设 <select id="persona-select"></select></label><button class="secondary" id="persona-new">+ 新建身份</button><button id="persona-activate">当前存档使用</button><button class="secondary" id="persona-off">不使用</button></div>
+    <div class="two-cols"><label>身份 ID<input id="persona-id" maxlength="64"></label><label>希望被怎么称呼<input id="persona-name" maxlength="80"></label></div>
+    <label>玩家身份介绍<textarea id="persona-description" rows="6" placeholder="按需填写，不建议输入真实隐私信息。"></textarea></label>
+    <label class="inline-check"><input id="persona-share" type="checkbox"> 允许将当前玩家身份介绍发送给所选 AI 服务</label>
+    <div class="footer-bar"><span id="persona-revision" class="muted"></span><button id="persona-save">保存玩家身份</button></div>
+  </div>
+</section>
+
+<section class="pane" id="tab-presets">
+  <div class="eyebrow">NARRATIVE STYLE · PRESETS</div>
+  <h1>六种叙事预设</h1>
+  <p class="lead">不是“预设对话”，而是改变自由聊天的对白长度、环境描写、主动性和情绪表达。保存或切换后会影响下一轮 DeepSeek 提示词。</p>
+  <div id="preset-cards" class="preset-cards"></div>
+  <div class="surface form-panel">
+    <div class="toolbar"><label>编辑的预设 <select id="preset-select"></select></label><button class="secondary" id="preset-copy">复制为自定义预设</button></div>
+    <div class="two-cols"><label>预设 ID<input id="preset-id" maxlength="64"></label><label>名称<input id="preset-name" maxlength="80"></label></div>
+    <label>说明<input id="preset-description" maxlength="800"></label>
+    <div class="three-cols">
+      <label>回复长度<select id="preset-length"><option value="short">简短</option><option value="medium">适中</option><option value="long">丰富</option></select></label>
+      <label>环境描写<select id="preset-narration"><option value="none">无</option><option value="low">少量</option><option value="medium">适中</option><option value="high">丰富</option></select></label>
+      <label>角色主动性<select id="preset-initiative"><option value="low">安静</option><option value="normal">平衡</option><option value="high">主动</option></select></label>
+      <label>文风<select id="preset-tone"><option value="natural">日常口语</option><option value="visual_novel">视觉小说</option><option value="literary">文学细腻</option></select></label>
+      <label>情绪表达<select id="preset-emotion"><option value="restrained">克制</option><option value="natural">自然</option><option value="expressive">外显</option></select></label>
+      <label>事件导演频率<select id="preset-frequency"><option value="off">关闭</option><option value="low">低</option><option value="normal">中</option><option value="high">高</option></select></label>
+    </div>
+    <label>额外创作要求（仅角色表演建议，不能修改程序权限）<textarea id="preset-guidance" rows="3"></textarea></label>
+    <div class="footer-bar"><span id="preset-revision" class="muted">内置预设只读，可先复制</span><button id="preset-save">保存自定义预设</button><button id="preset-activate">应用为当前风格</button></div>
+  </div>
+</section>
+
+<section class="pane" id="tab-lore">
+  <div class="eyebrow">LOREBOOK · CONTEXT RETRIEVAL</div>
+  <h1>世界书 Lorebook</h1>
+  <p class="lead">按关键词、地点或属性条件动态加载，避免整本设定每轮都上传给 DeepSeek。未核实的原作知识应标注为自创或待审核。</p>
+  <div class="layout-split">
+    <div class="surface">
+      <h2>当前角色的条目</h2><div id="lore-list" class="list-rows"></div>
+      <button class="secondary" id="lore-new">+ 新建条目</button>
+    </div>
+    <div class="surface form-panel">
+      <div class="two-cols"><label>条目 ID<input id="lore-id" maxlength="64"></label><label>标题<input id="lore-title" maxlength="100"></label></div>
+      <label>具体设定内容<textarea id="lore-content" rows="5"></textarea></label>
+      <label>关键词（逗号分隔）<input id="lore-keywords" placeholder="公园, 散步, 看风景"></label>
+      <div class="three-cols">
+        <label>激活方式<select id="lore-activation"><option value="keyword">关键词</option><option value="always">始终</option><option value="location">当前地点</option><option value="game_state">属性条件</option></select></label>
+        <label>作用范围<select id="lore-scope"><option value="character">角色</option><option value="global">世界全局</option><option value="location">地点</option><option value="story">剧情</option><option value="event">事件</option><option value="player">玩家</option><option value="session">会话</option></select></label>
+        <label>优先级<input type="number" id="lore-priority" min="0" max="100" value="50"></label>
+        <label>事实类型<select id="lore-fact"><option value="fanon">自创设定</option><option value="canon">原作设定</option><option value="game_log">游戏事件</option><option value="personal_memory">个人记忆</option></select></label>
+        <label>仅以下地点触发（ID，逗号分隔）<input id="lore-locations" placeholder="home, park"></label>
+        <label>最低好感度<input id="lore-affection" type="number" min="0" max="100" placeholder="不限制"></label>
+      </div>
+      <label>其他条件 JSON（信任／关系阶段／心情／flags；不填写代码）<textarea id="lore-extra" rows="3" placeholder='{"trust_min": 40, "stage_any": ["familiar"]}'></textarea></label>
+      <div class="two-cols">
+        <label class="inline-check"><input type="checkbox" id="lore-enabled" checked> 启用</label>
+        <label class="inline-check"><input type="checkbox" id="lore-verified"> 内容经过核实</label>
+      </div>
+      <label>来源备注<input id="lore-source" maxlength="300"></label>
+      <div class="footer-bar"><span id="lore-revision" class="muted">新条目</span><button class="secondary" id="lore-delete">删除</button><button id="lore-save">保存世界书</button></div>
+    </div>
+  </div>
+  <div class="surface">
+    <h2>测试条目激活</h2>
+    <div class="toolbar"><input id="lore-query" placeholder="输入模拟对话，例如：我们去公园散步吧"><button id="lore-test">检查命中</button></div>
+    <div id="lore-results" class="trace"></div>
+  </div>
+</section>
+
+<section class="pane" id="tab-inspector">
+  <div class="eyebrow">PROMPT COMPOSER · AUDIT</div>
+  <h1>本轮 Prompt 检查器</h1>
+  <p class="lead">记录实际选中的世界书 ID、角色版本、属性版本和粗略 Token 预算。不会显示 API 密钥，也不会自动泄露完整聊天记录。</p>
+  <div class="surface">
+    <h2>最近一轮真实请求的扩展摘要</h2>
+    <div id="prompt-trace" class="trace">尚无请求</div>
+    <button id="trace-refresh" class="secondary">刷新</button>
+  </div>
+  <div class="surface">
+    <h2>本地预览角色扮演附加提示词</h2>
+    <p class="muted">这是帮助检查配置的本地预览，不会调用 DeepSeek；点击后会显示当前角色卡和已命中的世界书文本，请勿在公开截图中展示私人信息。</p>
+    <div class="toolbar"><input id="prompt-query" placeholder="要测试的聊天内容"><button id="prompt-preview">确认并预览</button></div>
+    <pre id="prompt-output" class="trace" aria-live="polite">尚未预览</pre>
+  </div>
+</section>
+</main>
+</div>
+<div id="toast" role="status" aria-live="polite"></div>
+</body>
+</html>

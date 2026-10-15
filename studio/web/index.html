@@ -3,14 +3,14 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Character Studio v0.12 P1 · 自由聊天与存档状态</title>
+<title>Character Studio v0.14.1 · 角色扮演与存档状态</title>
 <link rel="stylesheet" href="/style.css">
 <link rel="stylesheet" href="/game.css">
 </head>
 <body class="game-mode">
 <header class="topbar">
   <div class="brand"><div class="logo">C<span>✦</span></div>
-    <div><strong>Character Studio</strong><small>Character Platform · Desktop v0.12 P1</small></div></div>
+    <div><strong>Character Studio</strong><small>Character Platform · Desktop v0.14.1 P1.5</small></div></div>
   <div class="top-actions"><span id="engineBadge" class="pill">加载中</span>
     <button id="enterGame" class="btn outline">进入游戏模式</button><button id="refreshBtn" class="btn outline">刷新资源</button><button id="openSettings" class="btn">模型设置</button></div>
 </header>
@@ -307,8 +307,8 @@
       <label>AI 模式<select id="cfgMode"><option value="demo">离线演示</option><option value="deepseek">DeepSeek 官方 API</option><option value="openai">OpenAI 兼容接口</option></select></label>
       <label>LLM 接口地址<input id="cfgLlmUrl" placeholder="http://127.0.0.1:15721/v1"></label>
       <label>LLM 模型 ID<input id="cfgLlmModel" placeholder="填写代理实际支持的模型 ID"></label>
-      <label>角色名字<input id="cfgRoleName" placeholder="角色"></label>
-      <label class="wide">完整人设（每轮随系统上下文发送，最多 12000 字）<textarea id="cfgPersona" rows="8" maxlength="12000" placeholder="填写角色身份、性格、与你的关系、说话习惯和背景；不要填写 API 密钥。"></textarea><small>保存后从下一轮生效；云端 AI 会收到这段文字，不会收到原始 Word 文件。输出格式由程序统一控制。</small></label>
+      <label>旧版角色名字（当前名称在角色卡编辑）<input id="cfgRoleName" placeholder="角色" readonly></label>
+      <label class="wide">旧版人设（首次启动已迁入角色卡，保留备查）<textarea id="cfgPersona" rows="8" maxlength="12000" readonly></textarea><small>当前 AI 人设请到右上角「角色设定」→ 角色卡编辑并启用；此处旧值不再控制当前人物。角色资料按 Prompt 预算发送，可在检查器查看截断情况。</small></label>
       <label class="check wide"><input type="checkbox" id="cfgMemoryLLM">允许把“已启用的长期记忆”加入 LLM 请求上下文</label>
       <label class="check wide"><input type="checkbox" id="cfgTts">启用角色语音（未安装也不影响文字聊天）</label>
       <label>语音提供者<select id="cfgTtsProvider"><option value="qwen3_tts">Qwen3-TTS Base（需另外准备模型）</option><option value="gpt_sovits">GPT-SoVITS 本地服务</option><option value="system">系统本地语音（非角色声音）</option></select></label>
@@ -335,5 +335,6 @@
 <script src="/game_state_hud.js"></script>
 <script src="/app.js"></script>
 <script src="/game.js"></script>
+<script defer src="/roleplay/launcher.js"></script>
 </body>
 </html>

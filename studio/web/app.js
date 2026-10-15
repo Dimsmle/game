@@ -24,6 +24,8 @@ const imgURL=ref=>{
 };
 const clamp=(v,min,max)=>Math.min(max,Math.max(min,v));
 let settings={},manifest={layers:[],scenes:{day:"",night:""},events:[]};
+let activeRoleName="";
+const roleDisplayName=()=>activeRoleName||settings.role_name||"角色";
 let files=[],activeKind="images",atlasRef="",atlasImg=new Image(),crop=null,zoom=.5,rects=[];
 let selectedLayer="",mood="neutral",action="idle",scene="day",sceneSince=0;
 let gameBackdrop=null;
@@ -347,7 +349,7 @@ function drawStage(t){
  if(!gameMode){
   ctx.fillStyle="#0c1a30bb";ctx.fillRect(12,H-56,275,36);
   ctx.font="12px system-ui";ctx.textAlign="left";ctx.fillStyle="#e4eefc";
-  ctx.fillText((settings.role_name||"角色")+" · "+moodLabels[mood]+" · "+scene,24,H-33);
+  ctx.fillText(roleDisplayName()+" · "+moodLabels[mood]+" · "+scene,24,H-33);
  }
  if(playing&&analyser&&fft){
   analyser.getByteTimeDomainData(fft);
@@ -748,7 +750,7 @@ function appendBubble(text,who="assistant",label){
  const box=document.createElement("div");
  box.className="bubble "+(who==="user"?"user":"assistant");
  const title=document.createElement("span");
- title.className="who";title.textContent=label||(who==="user"?"你":settings.role_name||"角色");
+ title.className="who";title.textContent=label||(who==="user"?"你":roleDisplayName());
  box.append(title,document.createTextNode(text));
  $("chatMessages").append(box);
  $("chatMessages").scrollTop=$("chatMessages").scrollHeight;
@@ -1396,6 +1398,7 @@ async function start(){
  let ready=false;
  try{
   const state=await api("/api/state");
+  activeRoleName=state.roleplay?.name||"";
   settings=state.settings;manifest=state.manifest;
   setEngine();renderLayers();renderEvents();renderSceneBindings();
   $("backgroundAutoTime").checked=!!settings.auto_scene;
@@ -1447,13 +1450,14 @@ function loadGameExpression(plan){
 window.GameBridge={
  async profileChanged(){
   const state=await api('/api/state');
+  activeRoleName=state.roleplay?.name||"";
   $("chatMessages").replaceChildren();
   for(const item of state.history||[])appendBubble(item.content,item.role,item.source==="demo"?"演示回复":null);
   await refreshSystemPanel();
  },
  get ready(){return !booting;},
  get model(){return settings.character_model;},
- get speaker(){return settings.role_name&&settings.role_name!=="角色"?settings.role_name:"她";},
+ get speaker(){const name=roleDisplayName();return name!=="角色"?name:"她";},
  emotionLabel:emotion=>moodLabels[emotion]||emotion,
  get demo(){return settings.llm_mode==="demo";},
  chat:(text,onText)=>chatStream.send(text,onText),

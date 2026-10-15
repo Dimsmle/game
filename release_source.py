@@ -6,7 +6,7 @@ import zipfile
 
 ROOT=Path(__file__).resolve().parent
 TOP_SUFFIXES={".py",".md",".txt",".bat"}
-TREE_SUFFIXES={"studio":{ ".py",".js",".css",".html"},"tests":{".py",".js"},"docs":{".md"}}
+TREE_SUFFIXES={"studio":{ ".py",".js",".css",".html"},"tests":{".py",".js"},"docs":{".md"},"tools":{".py"}}
 
 
 def is_private_file(path):

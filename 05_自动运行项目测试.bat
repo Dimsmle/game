@@ -12,4 +12,7 @@ node --check studio\web\reply_player.js
 node tests\test_reply_player.js
 node tests\test_game_text.js
 node tests\test_game_state_hud.js
+node --check studio\roleplay_plus\web\main.js
+node --check studio\roleplay_plus\web\launcher.js
+node tests\test_roleplay_ui.js
 pause
