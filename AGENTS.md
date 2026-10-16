@@ -2,7 +2,9 @@
 
 Current user override (2026-10-16): read docs/SCENES_WARDROBE_AND_TRIGGER_RULES.md.
 CG keywords + configurable affection threshold now deterministically enter after
-ReplyTurn completion; any_location bypasses only the scene gate. AI exit remains.
+ReplyTurn completion; empty scenes means unrestricted, nonempty scenes restrict.
+Legacy any_location no longer bypasses a nonempty scenes list. AI exit remains.
+The stats editor belongs in role settings -> overview, immediately after the HUD.
 The human-only stats editor is authorized; LLMs still cannot submit stat effects.
 Use the supplied 40-place visual table and suffix convention a/b/c/d for times;
 keep fixed selected time across travel. Travel proposals still require player choice.

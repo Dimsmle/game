@@ -34,7 +34,7 @@ const RP = (() => {
       await api('/api/game/stats',{binding:statsBinding,stats,confirm:true});await loadStats();await refresh();show('属性已保存并备份；其他存档不受影响');
     }catch(e){show(e.message,true);}};
     statsPane.append(reload,save,cell('p','好感度、信任度和精力为0–100，心情为-100–100。仅修改当前存档；切换衣服不重置关系。'));
-    $('tab-character').append(statsPane);
+    $('stats').after(statsPane);
     const appearancePane=cell('section','','surface'),current=cell('p','');current.id='appearance-current';
     const label=cell('label','当前服装名称'),name=cell('input','');name.id='appearance-name';name.maxLength=80;name.placeholder='例如：校服、浴衣；不清楚可留空';label.append(name);
     const read=cell('button','读取当前服装'),saveAppearance=cell('button','保存服装名称');saveAppearance.id='save-appearance';

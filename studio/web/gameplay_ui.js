@@ -12,23 +12,22 @@
  let cgRules=[],cgRevision=0;
  const split=value=>value.split(/[,，\n]/).map(x=>x.trim()).filter(Boolean);
  let selectedCG=null;
- const anyLabel=document.createElement('label'),anyInput=document.createElement('input');anyInput.type='checkbox';anyInput.id='cg-any-location';anyLabel.append(anyInput,document.createTextNode('任意地点均可触发'));$('cg-editor').insertBefore(anyLabel,$('cg-save'));anyInput.onchange=()=>{$('cg-scenes').disabled=anyInput.checked;};
+ $('cg-scenes').placeholder='留空表示不限地点；多个地点用逗号分隔';
  const affectionLabel=document.createElement('label'),affectionInput=document.createElement('input');affectionLabel.textContent='好感度至少（0～100）';affectionInput.type='number';affectionInput.min=0;affectionInput.max=100;affectionInput.step=1;affectionInput.id='cg-affection';affectionInput.value=50;affectionLabel.append(affectionInput);$('cg-editor').insertBefore(affectionLabel,$('cg-save'));
- $('cg-editor').querySelector('p').textContent='当前角色、地点、任一关键词及好感度门槛满足时，读完回复后必定进入；不依赖AI同意。多个事件命中时优先最长关键词，再按事件ID排序。请勿配置太宽泛的关键词。CG退出仍可由对话或手动结束。';
+ $('cg-editor').querySelector('p').textContent='地点留空表示不限地点；填写后只在所填地点触发。当前角色、任一关键词、好感度门槛及素材均满足时，读完回复后必定进入；默认好感度至少50，可修改。多个事件命中时优先最长关键词，再按事件ID排序。CG退出仍可由对话或手动结束。';
  function editCG(rule){
   ++cgPreviewGeneration;cgPreviewView?.destroy();cgPreviewView=null;cgPreviewPanel.replaceChildren();
   selectedCG=rule.id||null;$('cg-editor').hidden=false;$('review').hidden=true;
   for(const [key,id] of Object.entries({id:'cg-id',title:'cg-title',group:'cg-group',model_prefix:'cg-model',hold_ms:'cg-hold',min_affection:'cg-affection'}))$(id).value=rule[key]??50;
   $('cg-id').readOnly=!!selectedCG;$('cg-scenes').value=rule.scenes.join(', ');$('cg-keywords').value=rule.keywords.join(', ');
   $('cg-enabled').checked=rule.enabled;$('cg-loop').checked=rule.loop;
-  anyInput.checked=rule.any_location===true;anyInput.onchange();
   $('cg-import-status').textContent='草稿保存不解析图片；启用时合成并校验完整CG。';
  }
  cgPreview.onclick=run(async()=>{const generation=++cgPreviewGeneration,group=$('cg-group').value.trim();cgPreviewView?.destroy();cgPreviewPanel.replaceChildren();const media=await api('/api/game/catalog?kind=media');await api('/api/game/catalog/cg',{group,revision:media.revision});const updated=await api('/api/game/catalog?kind=media'),item=updated.items.find(x=>x.group===group&&x.extension==='.cgseq');if(!item)throw Error('CG未导入');const doc=await api(item.sequence_url),prepared=await CGSequence.prepareSequence(doc,async frame=>{const image=new Image();image.src=frame.url;await image.decode();return image;});if(generation===cgPreviewGeneration)cgPreviewView=CGSequence.createView(cgPreviewPanel,prepared);});
  async function loadCG(){const doc=await api('/api/game/catalog?kind=cg_rules');cgRules=doc.data;cgRevision=doc.revision;return doc;}
  $('cg-new').onclick=()=>editCG({id:'',title:'',group:'',model_prefix:'shi',scenes:[],keywords:[],enabled:false,loop:true,hold_ms:3000});
  $('cg-save').onclick=run(async()=>{const row={id:$('cg-id').value.trim(),title:$('cg-title').value.trim(),group:$('cg-group').value.trim(),model_prefix:$('cg-model').value.trim(),scenes:split($('cg-scenes').value),keywords:split($('cg-keywords').value),enabled:$('cg-enabled').checked,loop:$('cg-loop').checked,hold_ms:Number($('cg-hold').value)};
-  if(String(affectionInput.value).trim()==='')throw Error('请填写好感度门槛');row.min_affection=Number(affectionInput.value);row.any_location=anyInput.checked;
+  if(String(affectionInput.value).trim()==='')throw Error('请填写好感度门槛');row.min_affection=Number(affectionInput.value);
   if(!selectedCG&&cgRules.some(x=>x.id===row.id))throw Error('事件ID已存在，请从列表选择后编辑');
   // Import before enabling: a failed parser must not leave an enabled broken rule.
   if(row.enabled){const media=await api('/api/game/catalog?kind=media');await api('/api/game/catalog/cg',{group:row.group,revision:media.revision});}

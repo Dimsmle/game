@@ -29,8 +29,10 @@ const settle=()=>new Promise(setImmediate);
  node('cg-title').value='自定义名字';await node('cg-save').onclick();
  assert.equal(rules.find(x=>x.group==='ev_shi_c08').title,'自定义名字');
  assert.equal(calls.filter(x=>x.path==='/api/game/catalog/cg').length,0); // draft cannot import or enable
- node('cg-any-location').checked=true;node('cg-any-location').onchange();assert.equal(node('cg-scenes').disabled,true);
- await node('cg-save').onclick();assert.equal(rules.find(x=>x.group==='ev_shi_c08').any_location,true);
+ assert.ok(![...nodes.values()].some(x=>x.id==='cg-any-location'));
+ node('cg-scenes').value='';await node('cg-save').onclick();
+ assert.deepEqual(rules.find(x=>x.group==='ev_shi_c08').scenes,[]);
+ assert.ok(!('any_location' in rules.find(x=>x.group==='ev_shi_c08')));
  node('filter').value='c08';node('filter').oninput();assert.equal(node('items').children.length,1);
  await node('scan').onclick();assert.ok(calls.some(x=>x.path==='/api/game/catalog/cg_shi'));
  node('kind').value='locations';await node('kind').onchange();assert.equal(node('cg-editor').hidden,true);

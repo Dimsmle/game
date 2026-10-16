@@ -436,15 +436,22 @@ class GameplayIntegration(unittest.TestCase):
             with self.assertRaises(urllib.error.HTTPError):urllib.request.urlopen(self.url+'/api/model_preview/..%2Fsecret')
         finally:self.server.RequestHandlerClass=original
 
-    def test_any_location_cg_skips_only_scene_gate(self):
+    def test_empty_scenes_unrestricted_and_legacy_flag_cannot_override_scenes(self):
         from studio import cg_events
         self.cg_scene();doc=self.cat.get('cg_rules');row=dict(doc['data'][0],scenes=[],any_location=True)
         self.cat._save('cg_rules',cg_events.validate_rules([row]),doc['revision'])
         app.game_store().move_location(gameplay.binding(app),'unknown','morning')
         self.assertTrue(cg_events.keyword_decision(app,'海边',cg_events.candidates(app)))
+        clean=cg_events.validate_rules([dict(row,any_location=False)])
+        self.assertNotIn('any_location',clean[0])
+        limited=dict(row,scenes=['bg05'],any_location=True)
+        current=self.cat.get('cg_rules')
+        self.cat._save('cg_rules',[limited],current['revision'])
+        self.assertEqual(cg_events.candidates(app),[])
+        current=self.cat.get('cg_rules')
+        self.cat._save('cg_rules',clean,current['revision'])
         app.STATE['settings']['character_model']='kan_10';self.assertEqual(cg_events.candidates(app),[])
         with self.assertRaises(ValueError):cg_events.validate_rules([dict(row,any_location='true')])
-        with self.assertRaises(ValueError):cg_events.validate_rules([dict(row,any_location=False)])
 
     def test_current_clothing_reaches_actual_prompt_and_edit_invalidates_old_turn(self):
         app.STATE['settings']['character_model']='shi_37'

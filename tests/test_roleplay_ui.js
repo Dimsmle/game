@@ -5,7 +5,7 @@ const nodes=new Map();
 function node(id=''){
  if(!nodes.has(id))nodes.set(id,{id,value:'',textContent:'',checked:false,readOnly:false,
   style:{},type:'text',children:[],classList:{toggle(){}},addEventListener(){},
-  append(...items){this.children.push(...items);},replaceChildren(){this.children=[];}});
+  append(...items){this.children.push(...items);},after(...items){this.following=items;},replaceChildren(){this.children=[];}});
  return nodes.get(id);
 }
 const status={binding:{card_id:'actor',persona_id:null,preset_id:'daily'},session:{profile_id:'default',generation:1},
@@ -23,7 +23,7 @@ const context={document:{getElementById:node,createElement:tag=>({...node('templ
  }};
 let source=fs.readFileSync('studio/roleplay_plus/web/main.js','utf8');
 assert.equal(source.split('return {refresh};').length,2);
-source=source.replace('return {refresh};','return {refresh,editLore,loreFromForm,newLore,selectBinding};');
+source=source.replace('return {refresh};','return {refresh,editLore,loreFromForm,newLore,selectBinding,installStats};');
 vm.runInNewContext(source+'\nglobalThis.testRP=RP;',context);
 (async()=>{
  const entry={revision:2,data:{entry_id:'school',title:'学校',content:'内容',keywords:['学校'],activation:'keyword',
@@ -44,5 +44,11 @@ vm.runInNewContext(source+'\nglobalThis.testRP=RP;',context);
  const selection=calls.find(x=>x.path==='/api/roleplay/select');
  assert.equal(selection.body.expected_session.generation,1);
  assert.equal(selection.body.expected_session.profile_id,'default');
- console.log('Roleplay UI: preset/editor sync, profile guard, advanced lore conditions and safe JSON passed');
+ context.testRP.installStats();
+ const editor=node('stats').following[0];
+ assert.equal(editor.children[0].textContent,'当前角色属性');
+ assert.equal(editor.children.filter(x=>x.type==='number').length,0); // inputs live inside labels
+ assert.equal(editor.children.filter(x=>x.children?.some(y=>y.type==='number')).length,4);
+ assert.ok(!node('tab-character').children.includes(editor));
+ console.log('Roleplay UI: overview stats editor, preset/editor sync, profile guard and lore conditions passed');
 })().catch(error=>{console.error(error);process.exitCode=1;});

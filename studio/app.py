@@ -956,10 +956,19 @@ class Handler(BaseHTTPRequestHandler):
             # never JSON request bodies.
             app_log("http",message)
     def reply(self,status,content,content_type="application/json; charset=utf-8"):
+        if getattr(self,'_client_disconnected',False):return False
         if isinstance(content,(dict,list)):
             content=json.dumps(content,ensure_ascii=False).encode("utf-8")
         if isinstance(content,str):
             content=content.encode("utf-8")
+        try:
+            return self._send_reply(status,content,content_type)
+        except (BrokenPipeError,ConnectionResetError,ConnectionAbortedError):
+            # The peer is gone. Never try to send an error on this same socket.
+            self._client_disconnected=True
+            self.close_connection=True
+            return False
+    def _send_reply(self,status,content,content_type):
         self.send_response(status)
         self.send_header("Content-Type",content_type)
         self.send_header("Content-Length",str(len(content)))
@@ -975,6 +984,7 @@ class Handler(BaseHTTPRequestHandler):
             "font-src 'self' data:; object-src 'none'; frame-ancestors 'none'")
         self.end_headers()
         self.wfile.write(content)
+        return True
     def err(self,exc,code=400):
         self.reply(code,{"error":str(exc)[:550]})
     def static(self,p,kind=None):

@@ -36,8 +36,9 @@ def validate_rules(value):
         keys={'id','title','group','enabled','model_prefix','scenes','keywords','loop','hold_ms'}
         if not isinstance(raw,dict) or set(raw)-{'min_affection','any_location'}!=keys:raise ValueError('CG规则字段不完整或包含执行字段')
         row=dict(raw)
-        row.setdefault('any_location',False)
-        if type(row['any_location']) is not bool:raise ValueError('任意地点开关必须是布尔值')
+        # Accept the old field for compatibility, but scenes alone now own the gate.
+        if 'any_location' in row and type(row['any_location']) is not bool:raise ValueError('旧地点开关必须是布尔值')
+        row.pop('any_location',None)
         row.setdefault('min_affection',50)
         if type(row['min_affection']) is not int or not 0<=row['min_affection']<=100:raise ValueError('好感度门槛需为0～100整数')
         for key in ('id','group','model_prefix'):identifier(row[key],key)
@@ -50,7 +51,7 @@ def validate_rules(value):
         for key in ('scenes','keywords'):
             if not isinstance(row[key],list) or not 0<=len(row[key])<=30:raise ValueError('场景和关键词各最多30项')
             row[key]=list(dict.fromkeys(bounded_text(x,limit=60) for x in row[key]))
-        if row['enabled'] and (not row['title'] or (not row['any_location'] and not row['scenes']) or not row['keywords']):raise ValueError('启用前请填写标题、关键词，以及场景或任意地点开关')
+        if row['enabled'] and (not row['title'] or not row['keywords']):raise ValueError('启用前请填写标题和关键词；地点留空表示不限')
         if type(row['hold_ms']) is not int or not 500<=row['hold_ms']<=15000:raise ValueError('差分停留时间需为500～15000毫秒')
         result.append(row)
     return result
@@ -134,7 +135,7 @@ def candidates(app,include_locked=False):
     assets=cat.get('media')['data']['assets'];model=app.STATE['settings'].get('character_model','')
     return [rule for rule in cat.get('cg_rules')['data'] if rule['enabled']
             and (include_locked or state['stats']['affection']>=rule.get('min_affection',50))
-            and model.startswith(rule['model_prefix']+'_') and (rule.get('any_location',False) or labels.intersection(rule['scenes']))
+            and model.startswith(rule['model_prefix']+'_') and (not rule['scenes'] or labels.intersection(rule['scenes']))
             and any(x.get('group')==rule['group'] and x.get('extension')=='.cgseq' for x in assets)]
 
 
