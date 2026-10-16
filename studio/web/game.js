@@ -52,6 +52,7 @@
    const button=document.createElement("button");button.type="button";
    const title=document.createElement("strong");title.textContent=item.title;button.append(title);
    if(item.description){const description=document.createElement("span");description.textContent=item.description;button.append(description);}
+    if(item.preview){const image=document.createElement('img');image.src=item.preview;image.alt=item.title;image.loading='lazy';image.style.cssText='width:100%;height:170px;object-fit:contain;background:#15212b';button.append(image);}
    button.onclick=item.action;container.append(button);
   }
  }
@@ -190,10 +191,10 @@
    try{
     const result=await request('/api/game/locations');
     el('gamePickerTitle').textContent='场景地点';el('gamePickerNote').textContent=result.items.length?'选择地点后进入对应背景。':'请先在「场景与CG事件」给背景填写地点名称。';
-    setOptions(el('gamePickerOptions'),result.items.flatMap(item=>item.times.map(period=>({title:item.display_name+' · '+({morning:'早晨',day:'白天',evening:'傍晚',night:'夜间',unknown:'未标时段'}[period]||period),action:async()=>{
-     try{await gameplayController.transition('scene',{location_id:item.location_id,time_of_day:period});picker.close();el('gamePlace').textContent=item.display_name;}
+    setOptions(el('gamePickerOptions'),result.items.map(item=>({title:item.display_name,action:async()=>{
+     try{await gameplayController.transition('scene',{location_id:item.location_id});picker.close();el('gamePlace').textContent=item.display_name;}
      catch(error){el('gamePickerNote').textContent=error.message;}
-    }}))));showDialog(picker);
+    }})));showDialog(picker);
    }catch(error){el('gameHint').textContent=error.message;}
    return;
   }
@@ -215,14 +216,20 @@
   try{
    const models=await bridge.models();
    if(generation!==warmGeneration)return;
-   setOptions(el("gamePickerOptions"),models.map(model=>({title:model.label,action:async()=>{
+   const change=async model=>{
     const generation=++warmGeneration;
     await stopChat();
     if(generation!==warmGeneration)return;
     picker.close();director.stop();setBusy(true);
     try{cgEventController?.cancel();await bridge.changeModel(model.name);if(generation!==warmGeneration)return;if(chatMode)await openChat();else await startStory(selectedStory||"promise");}
     catch(error){if(generation===warmGeneration){setBusy(false);el("gameText").textContent=error.message;}}
-   }})));
+   };
+   const poses=character=>{const rows=models.filter(x=>(x.character||x.name.split('_')[0])===character);el('gamePickerTitle').textContent=character+' · 选择姿势';setOptions(el('gamePickerOptions'),[
+    {title:'返回角色列表',action:characters},...Array.from(new Set(rows.map(x=>x.pose_family||'unclassified'))).map(pose=>({title:({pose_a:'姿势 A',pose_b:'姿势 B',unclassified:'未分类姿势'}[pose]||pose),action:()=>{
+     el('gamePickerTitle').textContent=character+' · 选择衣服';setOptions(el('gamePickerOptions'),[{title:'返回姿势列表',action:()=>poses(character)},...rows.filter(x=>(x.pose_family||'unclassified')===pose).map(model=>({title:model.outfit_label||model.name,description:model.preview_url?model.name:'暂无预览 · 切换后生成',preview:model.preview_url,action:()=>change(model)}))]);
+    }}))]);};
+   const characters=()=>{el('gamePickerTitle').textContent='选择角色';setOptions(el('gamePickerOptions'),Array.from(new Set(models.map(x=>x.character||x.name.split('_')[0]))).map(code=>({title:code,action:()=>poses(code)})));};
+   characters();
   }catch(error){el("gamePickerNote").textContent=error.message;}
  }
  function changeMode(game){
@@ -334,9 +341,9 @@
   cgEventController=new CGEventStage({request,preload,
    show(session,loaded){cgView?.destroy();cgOverlay.hidden=false;cgView=CGSequence.createStageView(cgOverlay,loaded.sequence,{loop:session.loop,hold_ms:session.hold_ms});el('gameSceneTitle').textContent=session.title;},
    hide(){cgView?.destroy();cgView=null;cgOverlay.hidden=true;el('gameSceneTitle').textContent='和她聊一会儿';}});
-  gameplayController=new GameplayStage({request,preload,applyScene:bridge.applyVerifiedScene,
+  gameplayController=new GameplayStage({request,preload,async applyScene(asset,loaded){await bridge.applyVerifiedScene(asset,loaded);if(asset?.location_name)el('gamePlace').textContent=asset.location_name;},
    onCG:command=>cgEventController.act(command),
-   onCGStatus(info){if(info?.keyword_matched_ids?.length&&info.status!=='accepted')el('gameHint').textContent=info.status==='model_null'?'关键词已匹配；AI本轮未决定进入CG（可继续描述要进行的活动）':'AI事件决定无效，未执行CG；详见本机日志。';},
+   onCGStatus(info){if(info?.threshold_blocked_ids?.length)el('gameHint').textContent='关键词已匹配，但好感度尚未达到事件门槛。';else if(info?.keyword_matched_ids?.length&&info.status!=='accepted')el('gameHint').textContent='事件决定无效，未执行CG；详见本机日志。';},
    onOffer(event){offeredInstance=event?.instance_id||null;if(!event){offer.close();return;}title.textContent=event.title;options.replaceChildren();
     for(const option of event.choices){const button=document.createElement('button');button.textContent=option.label;button.onclick=async()=>{button.disabled=true;try{await gameplayController.transition('event',{instance_id:event.instance_id,choice_id:option.id});}catch(error){el('gameHint').textContent=error.message;button.disabled=false;}};options.append(button);}
     if(!offer.open)offer.showModal();
@@ -352,6 +359,13 @@
     await new Promise(resolve=>{const close=async()=>{closeGameplayMedia=null;audio.pause();sequenceView?.destroy();sequenceView=null;mediaDialog.close();try{await request('/api/game/media/end',{token});}finally{resolve();}};closeGameplayMedia=close;mediaClose.onclick=close;mediaDialog.oncancel=event=>{event.preventDefault();close();};});
    }});
   const link=document.createElement('a');link.href='/gameplay/';link.textContent='场景与CG事件';link.className='btn';menu.append(link);
+  const timeButton=document.createElement('button');timeButton.textContent='调整时间';timeButton.id='gameTime';timeButton.onclick=async()=>{
+   menu.close();await stopChat();try{const current=await request('/api/game/interaction');
+    if(current.state.scene.location_id==='unknown')throw Error('请先选择一个场景');
+    el('gamePickerTitle').textContent='调整时间';el('gamePickerEyebrow').textContent='固定时间';el('gamePickerNote').textContent='换地点不改变此时间；缺少对应图片时使用该地点默认画面。';
+    setOptions(el('gamePickerOptions'),[['morning','早晨'],['day','下午'],['evening','晚上'],['night','深夜']].map(([period,title])=>({title,action:async()=>{try{await gameplayController.transition('scene',{location_id:current.state.scene.location_id,time_of_day:period});picker.close();}catch(error){el('gamePickerNote').textContent=error.message;}}})));showDialog(picker);
+   }catch(error){el('gameHint').textContent=error.message;}
+  };menu.append(timeButton);
   const exitCG=document.createElement('button');exitCG.textContent='结束当前CG事件';exitCG.onclick=async()=>{try{await stopChat();await cgEventController.exit();menu.close();}catch(error){el('gameHint').textContent=error.message;}};menu.append(exitCG);
   setInterval(()=>{if(document.body.classList.contains('game-mode'))cgEventController.sync().catch(error=>{el('gameHint').textContent=error.message;});},4000);
   const mirrorLabel=document.createElement('label'),mirrorToggle=document.createElement('input');mirrorToggle.type='checkbox';mirrorToggle.onchange=()=>bridge.mirror(mirrorToggle.checked);mirrorLabel.append(mirrorToggle,document.createTextNode('水平镜像角色'));menu.append(mirrorLabel);

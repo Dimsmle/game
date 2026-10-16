@@ -87,7 +87,7 @@ class ReplyTurn:
 
 def instructions():
     return ('\n本轮顶层格式以下述逐句协议为准，上述字段规则应用于每个段落：'
-        '只输出 {"segments":[...],"event_proposal":null,"cg_event":null}，不要顶层 speech；'
+        '只输出 {"segments":[...],"event_proposal":null,"cg_event":null,"scene_proposal":null}，不要顶层 speech；'
         '有本轮合法事件候选时才允许提供 event_proposal，不能输出效果或自创事件。'
         '每段有kind=dialogue（角色对白）或narration（场景/神态旁白），兼容旧协议仍用speech存文字。'
         '可以穿插简短场景描写，不必全是对白，不代替玩家做决定；不强制每轮旁白。'

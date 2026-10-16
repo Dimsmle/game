@@ -155,6 +155,22 @@ class GameStore:
         catalog=sum(r[0] for r in db.execute('SELECT revision FROM game_catalog'))
         return dict(session,revision=state['revision'],roleplay_epoch=epoch,catalog_epoch=catalog)
 
+    def edit_stats(self,binding,stats):
+        """Explicit player editor only; never reachable from a model intention."""
+        if not isinstance(stats,dict) or set(stats)!=set(schema.RANGES):raise ValueError('需要完整的四项属性')
+        for key,(low,high) in schema.RANGES.items():schema.integer(stats[key],low,high)
+        backup_database(self.path)
+        with connect(self.path) as db:
+            db.execute('BEGIN IMMEDIATE')
+            if self.gameplay_binding(db)!=binding:raise ValueError('存档已变化，请刷新属性')
+            state=self._state(db,binding['profile_id']);before=dict(state['stats'])
+            state['stats']=dict(stats);state['revision']+=1;schema.validate_state(state)
+            now=datetime.now().isoformat()
+            db.execute('UPDATE game_state SET revision=?,state_json=?,updated_at=? WHERE profile_id=?',(state['revision'],json.dumps(state),now,binding['profile_id']))
+            db.execute('INSERT INTO game_journal(profile_id,event_id,kind,payload_json,idempotency_key,created_at) VALUES(?,?,?,?,?,?)',
+                (binding['profile_id'],'player_stats_editor','manual_stats',json.dumps({'before':before,'after':stats}),uuid.uuid4().hex,now))
+            db.commit();return state
+
     def move_location(self,binding,location_id,time_of_day,*,locked=True):
         """Reviewed coordinator only; not an arbitrary client state endpoint."""
         schema.identifier(location_id)
@@ -236,7 +252,7 @@ class GameStore:
             # Decline is guaranteed by the reviewed event schema/coordinator to have no effects.
             if choice!='decline' and event.get('one_shot_flag'):value['flags'][event['one_shot_flag']]=True
             if effect['location_id']:
-                value['scene']={'location_id':effect['location_id'],'time_of_day':media_result['scene']['time_of_day'],'lock':True}
+                value['scene']={'location_id':effect['location_id'],'time_of_day':state['scene']['time_of_day'] if state['scene']['time_of_day']!='unknown' else 'morning','lock':True}
             schema.validate_state(value)
             result={'instance_id':instance,'event_id':event['id'],'choice_id':choice,'state':value,'applied':applied,**media_result}
             payload={'applied':applied,'state':value,'event_title':event['title'],'choice_id':choice,'choice_label':next(c['label'] for c in event['choices'] if c['id']==choice)}

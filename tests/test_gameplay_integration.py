@@ -263,7 +263,7 @@ class GameplayIntegration(unittest.TestCase):
         from studio import cg_events
         self.import_test_cg();self.review_location()
         app.STATE['settings']['character_model']='shi_15'
-        rules=cg_events.validate_rules([dict(cg_events.DEFAULT[0],scenes=['Loc_1'],keywords=['海边','玩水','散步'])])
+        rules=cg_events.validate_rules([dict(cg_events.DEFAULT[0],scenes=['Loc_1'],keywords=['海边','玩水','散步'],min_affection=0)])
         self.cat._save('cg_rules',rules,self.cat.get('cg_rules')['revision'])
         p=self.post('/api/game/scene/prepare',{'location_id':'Loc_1','time_of_day':'day'})
         self.post('/api/game/commit',{'prepare_token':p['prepare_token'],'loaded':True})
@@ -274,7 +274,7 @@ class GameplayIntegration(unittest.TestCase):
             yield json.dumps({'segments':[{'speech':'我们在海边聊一会儿。','emotion':'gentle'}],
                               'cg_event':{'action':action,'event_id':event_id}},ensure_ascii=False)
         with patch.object(llm.OpenAICompatibleProvider,'stream',service):
-            result=list(app.stream_chat('来海边玩水吧','cg_mock_'+action))[-1]['result']
+            result=list(app.stream_chat('开始吧','cg_mock_'+action))[-1]['result']
         app.activate_reply(result['turn_id'],0)
         return result
 
@@ -324,6 +324,7 @@ class GameplayIntegration(unittest.TestCase):
         self.import_test_cg();folder=self.root/'assets_pfs_002/image/bg';folder.mkdir(parents=True)
         for suffix in ('aa','ab'):Image.new('RGB',(32,20),'blue').save(folder/('bg05'+suffix+'.png'))
         cg_events.setup_beach(app);doc=self.cat.get('locations')['data'];family=doc['families']['bg05']
+        app.game_store().edit_stats(gameplay.binding(app),dict(app.game_store().read()['stats'],affection=50))
         self.assertEqual({x['location_name'] for x in family},{'海边'})
         self.assertEqual({x['suffix']:x['time_of_day'] for x in family},{'aa':'morning','ab':'unknown'})
         self.assertFalse(doc['families']['bg02'][0]['verified'])
@@ -348,15 +349,15 @@ class GameplayIntegration(unittest.TestCase):
         invalid=dict(doc['data'][1],enabled=True)
         with self.assertRaises(ValueError):cg_events.validate_rules([invalid])
 
-    def test_keyword_alone_does_not_force_and_diagnostic_distinguishes_missing_decision(self):
+    def test_keyword_and_affection_force_even_when_model_returns_null(self):
         self.cg_scene()
         def service(provider,messages,cancel):
             self.captured=messages
             yield json.dumps({'segments':[{'speech':'我明白了。'}],'cg_event':None})
         with patch.object(llm.OpenAICompatibleProvider,'stream',service):result=list(app.stream_chat('海边','diagnose_cg'))[-1]['result']
-        diagnostic=result['cg_diagnostic'];self.assertEqual(diagnostic['status'],'model_null')
+        diagnostic=result['cg_diagnostic'];self.assertEqual(diagnostic['status'],'accepted')
         self.assertEqual(diagnostic['keyword_matched_ids'],['shi_beach'])
-        self.assertIsNone(app.REPLY_TURN.current['cg_decision'])
+        self.assertEqual(app.REPLY_TURN.current['cg_decision'],{'action':'enter','event_id':'shi_beach'})
         self.assertIn('不能只在台词中答应却遗漏cg_event',self.captured[0]['content'])
         self.assertNotIn('海边',json.dumps(diagnostic,ensure_ascii=False))
 
@@ -370,6 +371,94 @@ class GameplayIntegration(unittest.TestCase):
         self.assertEqual(app.history()[-1]['content'],'【旁白】风吹过海面。')
         self.assertNotIn('微笑',app.history()[-1]['content'])
         app.activate_reply(result['turn_id'],1);self.assertIn('（微笑）你好。',app.history()[-1]['content'])
+
+    def test_stats_editor_is_profile_bound_strict_and_not_ai_reward(self):
+        old=gameplay.binding(app);state=self.post('/api/game/stats',{'binding':old,'stats':dict(app.game_store().read()['stats'],affection=85),'confirm':True})['state']
+        self.assertEqual(state['stats']['affection'],85)
+        self.assertTrue(list((app.DB_FILE.parent/'backups').glob('*.sqlite3')))
+        with self.assertRaises(urllib.error.HTTPError):self.post('/api/game/stats',{'binding':old,'stats':state['stats'],'confirm':True})
+        for bad in (True,101,1.5):
+            with self.assertRaises(urllib.error.HTTPError):self.post('/api/game/stats',{'binding':gameplay.binding(app),'stats':dict(state['stats'],affection=bad),'confirm':True})
+        app.game_store().create('another_stats','Other');app.select_game_profile('another_stats')
+        self.assertEqual(app.game_store().read()['stats']['affection'],25)
+        with game_db.connect(app.DB_FILE) as db:self.assertEqual(db.execute("SELECT count(*) FROM game_journal WHERE kind='manual_stats'").fetchone()[0],1)
+
+    def test_keyword_threshold_boundary_and_null_model_still_enters(self):
+        from studio import cg_events
+        self.cg_scene();doc=self.cat.get('cg_rules');row=dict(doc['data'][0],min_affection=50);self.cat._save('cg_rules',[row],doc['revision'])
+        for affection,allowed in ((49,False),(50,True),(51,True)):
+            app.game_store().edit_stats(gameplay.binding(app),dict(app.game_store().read()['stats'],affection=affection))
+            self.assertEqual(bool(cg_events.keyword_decision(app,'海边',cg_events.candidates(app))),allowed)
+        with self.assertRaises(ValueError):cg_events.validate_rules([dict(row,min_affection=True)])
+
+    def test_user_scene_table_labels_zbg_times_and_reimport_preserves_edits(self):
+        from studio import scene_labels
+        folder=self.root/'assets_pfs_002/image/bg';folder.mkdir(parents=True)
+        for name in ('bg05aa','bg05ab','bg05ba','bg05ac','bg05ad','bg05af','zbg25ac','bg99aa'):
+            Image.new('RGB',(32,20),'blue').save(folder/(name+'.png'))
+        self.assertTrue(scene_labels.install(app));doc=self.cat.get('locations');family=doc['data']['families']['bg05']
+        self.assertEqual({x['location_name'] for x in family},{'海边'})
+        self.assertEqual({x['suffix']:x['time_of_day'] for x in family},{'aa':'morning','ab':'day','ba':'morning','ac':'evening','ad':'night','af':'unknown'})
+        self.assertEqual(len(scene_labels.NAMES),40);self.assertTrue(all(len(x)<=4 for x in scene_labels.NAMES.values()))
+        self.assertTrue(doc['data']['families']['bg25'][0]['verified'])
+        self.assertIsNone(scene_labels.proposal(app,{'location_id':'bg99'}))
+        family[0]['location_name']='自定';self.cat._save('locations',doc['data'],doc['revision']);self.assertFalse(scene_labels.install(app))
+        self.assertEqual(self.cat.get('locations')['data']['families']['bg05'][0]['location_name'],'自定')
+
+    def test_fixed_time_survives_scene_fallback_and_travel_choice(self):
+        self.review_location(1);self.review_location(2)
+        prepared=self.post('/api/game/scene/prepare',{'location_id':'Loc_1','time_of_day':'night'})
+        result=self.post('/api/game/commit',{'prepare_token':prepared['prepare_token'],'loaded':True})
+        self.assertEqual(result['state']['scene']['time_of_day'],'night')
+        prepared=self.post('/api/game/scene/prepare',{'location_id':'Loc_2'})
+        result=self.post('/api/game/commit',{'prepare_token':prepared['prepare_token'],'loaded':True})
+        self.assertEqual(result['state']['scene']['time_of_day'],'night')
+        def service(provider,messages,cancel):
+            self.captured=messages
+            yield json.dumps({'segments':[{'speech':'我们去另一个地方吧。'}],'scene_proposal':{'location_id':'Loc_1'}})
+        with patch.object(llm.OpenAICompatibleProvider,'stream',service):reply=list(app.stream_chat('去合成地点1','travel_test'))[-1]['result']
+        self.assertTrue(reply['event_pending']);app.activate_reply(reply['turn_id'],0)
+        offer=self.post('/api/game/turn/complete',{'turn_id':reply['turn_id'],'displayed':True,'tts_finished':True})['event']
+        self.assertEqual(app.game_store().read()['scene']['location_id'],'Loc_2')
+        prepared=self.post('/api/game/event/prepare',{'instance_id':offer['instance_id'],'choice_id':'accept'})
+        result=self.post('/api/game/commit',{'prepare_token':prepared['prepare_token'],'loaded':True,'idempotency_key':'travel_test_choice'})
+        self.assertEqual(result['state']['scene']['location_id'],'Loc_1');self.assertEqual(result['state']['scene']['time_of_day'],'night')
+
+    def test_wardrobe_preview_uses_cached_png_and_rejects_paths(self):
+        import main_desktop
+        original=self.server.RequestHandlerClass
+        self.server.RequestHandlerClass=main_desktop.StudioHandler;self.server.asset_root=self.root
+        folder=self.root/'character_exports';folder.mkdir(exist_ok=True);Image.new('RGBA',(740,1250),'blue').save(folder/'shi_37_neutral.png')
+        try:
+            with urllib.request.urlopen(self.url+'/api/model_preview/shi_37') as response:
+                from io import BytesIO
+                with Image.open(BytesIO(response.read())) as im:self.assertLessEqual(im.width,190);self.assertLessEqual(im.height,320)
+            with self.assertRaises(urllib.error.HTTPError):urllib.request.urlopen(self.url+'/api/model_preview/..%2Fsecret')
+        finally:self.server.RequestHandlerClass=original
+
+    def test_any_location_cg_skips_only_scene_gate(self):
+        from studio import cg_events
+        self.cg_scene();doc=self.cat.get('cg_rules');row=dict(doc['data'][0],scenes=[],any_location=True)
+        self.cat._save('cg_rules',cg_events.validate_rules([row]),doc['revision'])
+        app.game_store().move_location(gameplay.binding(app),'unknown','morning')
+        self.assertTrue(cg_events.keyword_decision(app,'海边',cg_events.candidates(app)))
+        app.STATE['settings']['character_model']='kan_10';self.assertEqual(cg_events.candidates(app),[])
+        with self.assertRaises(ValueError):cg_events.validate_rules([dict(row,any_location='true')])
+        with self.assertRaises(ValueError):cg_events.validate_rules([dict(row,any_location=False)])
+
+    def test_current_clothing_reaches_actual_prompt_and_edit_invalidates_old_turn(self):
+        app.STATE['settings']['character_model']='shi_37'
+        def service(provider,messages,cancel):
+            self.captured=messages
+            yield json.dumps({'segments':[{'speech':'我们聊聊吧。'}]})
+        self.post('/api/model_metadata',{'model':'shi_37','expected_current':True,'record':{'outfit_name':'测试浴衣'}})
+        with patch.object(llm.OpenAICompatibleProvider,'stream',service):reply=list(app.stream_chat('你穿什么','appearance_test'))[-1]['result']
+        prompt=self.captured[0]['content'];self.assertIn('测试浴衣',prompt);self.assertIn('姿势B',prompt)
+        self.assertNotIn(str(self.root),prompt)
+        self.post('/api/model_metadata',{'model':'shi_37','expected_current':True,'record':{'outfit_name':'测试校服'}})
+        with self.assertRaises(ValueError):app.activate_reply(reply['turn_id'],0)
+        app.STATE['settings']['character_model']='shi_15'
+        with self.assertRaises(urllib.error.HTTPError):self.post('/api/model_metadata',{'model':'shi_37','expected_current':True,'record':{'outfit_name':'旧造型'}})
 
 
 if __name__=='__main__':unittest.main()

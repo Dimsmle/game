@@ -98,7 +98,9 @@ def prepare(app,kind,payload):
     if app.ACTIVE_CHAT or unread or app.RUNTIME.snapshot()['speech_active']:raise ValueError('请先读完或停止当前对话')
     cat=catalog(app);b=binding(app);effect={};scene=None;asset=None
     if kind=='scene':
-        scene=cat.resolve_scene(payload.get('location_id'),payload.get('time_of_day','unknown'))
+        period=payload.get('time_of_day',app.game_store().read()['scene']['time_of_day'])
+        if period=='unknown':period='morning'
+        scene=cat.resolve_scene(payload.get('location_id'),period)
     elif kind=='event':
         with connect(app.DB_FILE) as db:
             row=db.execute('SELECT * FROM game_event_instances WHERE instance_id=?',(payload.get('instance_id'),)).fetchone()
@@ -113,7 +115,7 @@ def prepare(app,kind,payload):
     _PREPARED.clear()  # One shared active stage, like existing ReplyTurn.
     token=secrets.token_hex(16)
     _PREPARED[token]={'kind':kind,'payload':payload,'binding':b,'expires':time.monotonic()+300,
-        'scene':scene,'media':asset,'model':app.STATE['settings'].get('character_model')}
+                'scene':scene,'media':asset,'requested_time':period if kind=='scene' else None,'model':app.STATE['settings'].get('character_model')}
     return {'prepare_token':token,'scene':public_asset(scene,'locations'),'media':public_asset(asset,'media')}
 
 def public_asset(item,kind):
@@ -153,7 +155,7 @@ def commit(app,value):
         if p['media']:verify_media(cat,p['media'])
         return result
     if p['kind']=='scene':
-        result={'state':app.game_store().move_location(p['binding'],p['scene']['location_id'],p['scene']['time_of_day'],locked=not p.get('automatic',False)),**verify({})}
+        result={'state':app.game_store().move_location(p['binding'],p['scene']['location_id'],p.get('requested_time') or p['scene']['time_of_day'],locked=not p.get('automatic',False)),**verify({})}
     else:
         result=app.game_store().choose_event(p['payload']['instance_id'],p['payload']['choice_id'],
             value.get('idempotency_key'),p['binding'],verify)
@@ -274,6 +276,11 @@ def try_post(handler,path,value):
     elif path=='/api/game/interaction':
         if busy(app):raise ValueError('请先关闭演出再修改舞台互动设置')
         result={'state':app.game_store().interaction_settings(value.get('binding'),value.get('settings'))}
+        app.REPLY_TURN.clear();app.game_store().cancel_events()
+    elif path=='/api/game/stats':
+        if set(value)!={'binding','stats','confirm'} or value.get('confirm') is not True:raise ValueError('请通过属性编辑器明确保存')
+        if app.ACTIVE_CHAT:raise ValueError('请先停止正在生成的回复')
+        result={'state':app.game_store().edit_stats(value['binding'],value['stats'])}
         app.REPLY_TURN.clear();app.game_store().cancel_events()
     elif path=='/api/game/scene/prepare':result=prepare(app,'scene',value)
     elif path=='/api/game/scene/unlock':

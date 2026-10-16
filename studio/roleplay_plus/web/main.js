@@ -12,6 +12,37 @@ const RP = (() => {
   };
   let status = null, currentCard = null, currentPersona = null, currentPreset = null;
   let currentLore = null, pendingChoice = new Map(), toastTimer = null;
+  let statsPane=null,statsBinding=null;
+  let appearanceModel=null;
+  async function loadAppearance(){const result=await api('/api/model_metadata');appearanceModel=result.current;$('appearance-current').textContent='当前造型：'+(result.current||'尚未选择')+'；保存后每轮发送给AI';set('appearance-name',result.appearance?.outfit_name||result.record?.outfit_name||'');}
+  async function loadStats(){
+    const result=await api('/api/game/interaction');statsBinding=result.binding;
+    $('edit-stats-profile').textContent='当前存档：'+result.binding.profile_id+' · 玩家手动编辑（不是AI奖励）';
+    for(const key of ['affection','trust','mood','energy'])set('edit-'+key,result.state.stats[key]);
+  }
+  function installStats(){
+    statsPane=cell('section','','surface');statsPane.append(cell('h2','当前角色属性'));
+    const profile=cell('p','');profile.id='edit-stats-profile';statsPane.append(profile);
+    for(const [key,label,low] of [['affection','好感度',0],['trust','信任度',0],['mood','心情',-100],['energy','精力',0]]){
+      const wrap=cell('label',label),input=cell('input','');input.type='number';input.min=low;input.max=100;input.step=1;input.id='edit-'+key;wrap.append(input);statsPane.append(wrap);
+    }
+    const reload=cell('button','重新读取属性'),save=cell('button','保存当前存档属性');save.id='save-player-stats';
+    reload.onclick=()=>loadStats().catch(e=>show(e.message,true));
+    save.onclick=async()=>{try{
+      const stats=Object.fromEntries(['affection','trust','mood','energy'].map(key=>[key,Number(txt('edit-'+key))]));
+      if(Object.keys(stats).some(key=>txt('edit-'+key).trim()===''))throw Error('属性不能为空');
+      await api('/api/game/stats',{binding:statsBinding,stats,confirm:true});await loadStats();await refresh();show('属性已保存并备份；其他存档不受影响');
+    }catch(e){show(e.message,true);}};
+    statsPane.append(reload,save,cell('p','好感度、信任度和精力为0–100，心情为-100–100。仅修改当前存档；切换衣服不重置关系。'));
+    $('tab-character').append(statsPane);
+    const appearancePane=cell('section','','surface'),current=cell('p','');current.id='appearance-current';
+    const label=cell('label','当前服装名称'),name=cell('input','');name.id='appearance-name';name.maxLength=80;name.placeholder='例如：校服、浴衣；不清楚可留空';label.append(name);
+    const read=cell('button','读取当前服装'),saveAppearance=cell('button','保存服装名称');saveAppearance.id='save-appearance';
+    read.onclick=()=>loadAppearance().catch(e=>show(e.message,true));
+    saveAppearance.onclick=async()=>{try{await api('/api/model_metadata',{model:appearanceModel,expected_current:true,record:{outfit_name:txt('appearance-name').trim()}});await loadAppearance();show('当前服装名称已保存，下次回复将使用新标注');}catch(e){show(e.message,true);}};
+    appearancePane.append(cell('h2','发送给AI的服装'),current,label,read,saveAppearance,cell('p','这里只标注当前造型；不会替换图片。没有名称时AI只知道服装编号，不猜款式。'));
+    $('tab-character').append(appearancePane);
+  }
 
   function show(message, error=false) {
     const node=$('toast');
@@ -86,6 +117,7 @@ const RP = (() => {
     options('preset-select',status.presets,status.binding.preset_id);
     renderStatus();
     renderPresets();
+    if(statsPane){await loadStats();await loadAppearance();}
   }
   function renderStatus() {
     const state=status.game_state.state;
@@ -394,6 +426,7 @@ const RP = (() => {
     }catch(e){show(e.message,true);}
   }
   function bindUI() {
+    installStats();
     for (const button of document.querySelectorAll('.nav')) {
       button.addEventListener('click',()=>{
         const tab=button.dataset.tab;

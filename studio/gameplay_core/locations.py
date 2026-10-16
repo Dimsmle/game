@@ -8,7 +8,7 @@ import re
 from .common import (VALID_IMAGE_EXTENSIONS, identifier, bounded_text, checked_file,
                      fingerprint_file, require_keys, safe_candidates, stable_asset_id)
 
-BG_STEM=re.compile(r"^bg(?P<number>[0-9]{1,5})(?P<variant>[a-z]{2})$",re.IGNORECASE)
+BG_STEM=re.compile(r"^z?bg(?P<number>[0-9]{1,5})(?P<variant>[a-z]{2})$",re.IGNORECASE)
 KNOWN_SUFFIXES=frozenset({"aa","ab","ac","af"})
 TIME_TAGS=frozenset({"unknown","morning","day","evening","night"})
 NO_SCAN_FOLDERS={"character_exports","voice","voices","bgm","se","audio","music",
@@ -150,7 +150,7 @@ def resolve_background(catalog: dict, location_id: str, time_of_day: str,
     if not matches:return None
     exact=[x for x in matches if x["time_of_day"]==time_of_day]
     pool=exact or [x for x in matches if x["default"]] or matches
-    chosen=sorted(pool,key=lambda x:(not x["default"],x["asset_id"]))[0]
+    chosen=sorted(pool,key=lambda x:(not x["default"],x['suffix'][0]!='a',Path(x['relative_path']).stem.startswith('zbg'),x["asset_id"]))[0]
     return {key:chosen[key] for key in ("asset_id","file_hash","family","suffix",
                                       "location_id","location_name","time_of_day",
                                       "relative_path")}

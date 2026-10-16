@@ -7,6 +7,18 @@ from pathlib import Path
 
 import main_desktop
 from studio import app as studio, model_meta
+
+
+class WardrobeClassificationTests(unittest.TestCase):
+    def test_only_explicit_shi_ranges_and_reviewed_metadata(self):
+        for model,pose,outfit in [('shi_0','pose_a','outfit_00'),('shi_25','pose_a','outfit_25'),('shi_30','pose_b','outfit_00'),('shi_55','pose_b','outfit_25')]:
+            item=model_meta.wardrobe(model_meta.empty(),model);self.assertEqual(item['pose_family'],pose);self.assertEqual(item['outfit'],outfit)
+        for model in ('shi_26','shi_56','kan_30'):self.assertEqual(model_meta.wardrobe(model_meta.empty(),model)['pose_family'],'unclassified')
+        metadata=model_meta.update(model_meta.empty(),'shi_37',dict(pose_family='custom_pose',outfit='custom_dress',verified=True))
+        self.assertEqual(model_meta.wardrobe(metadata,'shi_37')['pose_family'],'custom_pose')
+        same=model_meta.update(model_meta.empty(),'shi_7',{'outfit_name':'蓝色浴衣'})
+        self.assertEqual(model_meta.appearance(same,'shi_37')['outfit_name'],'蓝色浴衣')
+        self.assertEqual(model_meta.appearance(same,'kan_7')['outfit_name'],'')
 import tests.test_emote as emote_fixture
 
 class ModelMetadataTests(unittest.TestCase):

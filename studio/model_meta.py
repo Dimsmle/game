@@ -16,6 +16,31 @@ SLUG_PATTERN=re.compile(r"^[a-z][a-z0-9_]{0,39}$")
 def empty():
     return {"version":1,"models":{}}
 
+
+def wardrobe(data,model):
+    """Use reviewed metadata first, then the user's explicit shi-only ranges."""
+    if not MODEL_PATTERN.fullmatch(model):raise ValueError('模型编号无效')
+    code,number=model.split('_');number=int(number);item=data.get('models',{}).get(model,{})
+    family=item.get('pose_family') if item.get('verified') else None
+    outfit=item.get('outfit') if item.get('verified') else None
+    if code=='shi' and (0<=number<=25 or 30<=number<=55):
+        family=family or ('pose_a' if number<=25 else 'pose_b')
+        outfit=outfit or f'outfit_{number if number<=25 else number-30:02}'
+    return {'character':code,'pose_family':family or 'unclassified',
+            'outfit':outfit or model,'outfit_label':item.get('outfit_name') or item.get('display_name') or (outfit.replace('outfit_','衣服 ') if outfit else model)}
+
+
+def appearance(data,model):
+    if not isinstance(model,str) or not MODEL_PATTERN.fullmatch(model):return None
+    row=wardrobe(data,model);record=data.get('models',{}).get(model,{})
+    name=record.get('outfit_name') or ''
+    if not name:
+        shared={entry['outfit_name'] for other,entry in data.get('models',{}).items() if entry.get('outfit_name')
+                and wardrobe(data,other)['character']==row['character'] and wardrobe(data,other)['outfit']==row['outfit']}
+        if len(shared)==1:name=shared.pop()
+    return {'outfit_label':name or row['outfit_label'],'outfit_name':name,
+            'pose':{'pose_a':'姿势A','pose_b':'姿势B'}.get(row['pose_family'],'已选姿势（未标注）')}
+
 def validate(data):
     if not isinstance(data,dict) or data.get("version")!=1:
         raise ValueError("模型元数据版本无效")
@@ -37,6 +62,7 @@ def validate(data):
             raise ValueError("pose_family 只能用小写英文/数字/下划线")
         clean["models"][model]={
             "display_name":display,
+            "outfit_name":str(item.get('outfit_name','')).strip()[:80],
             "outfit":outfit,
             "pose_family":family,
             "verified":bool(item.get("verified",False)),
@@ -60,7 +86,7 @@ def update(data,model,patch):
         raise ValueError("模型元数据必须是对象")
     current=dict(data["models"].get(model,{}))
     current.update({k:patch[k] for k in
-                    ("display_name","outfit","pose_family","verified","notes")
+                    ("display_name","outfit_name","outfit","pose_family","verified","notes")
                     if k in patch})
     raw={"version":1,"models":{**data["models"],model:current}}
     return validate(raw)

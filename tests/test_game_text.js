@@ -6,7 +6,7 @@ const mouth=[];
 function el(id){
  if(!elements.has(id))elements.set(id,{textContent:'',value:'',hidden:false,disabled:false,open:false,
   classList:{add(){},remove(){},toggle(){},contains(){return false;}},setAttribute(){},
-  addEventListener(){},replaceChildren(){},close(){this.open=false;},showModal(){this.open=true;},focus(){}});
+  children:[],style:{},append(...items){this.children.push(...items);},addEventListener(){},replaceChildren(...items){this.children=items;},close(){this.open=false;},showModal(){this.open=true;},focus(){}});
  return elements.get(id);
 }
 class Director {constructor(opts){this.opts=opts;}stop(){} }
@@ -19,7 +19,8 @@ class Reply {
 const bridge={ready:false,speaker:'她',demo:false,textSpeech:value=>mouth.push(value),
  cancelChat:async()=>{},stopSpeech:async()=>mouth.push(false),
  chat:async(text,onText)=>{preview=onText;return await new Promise(resolve=>resolveChat=resolve);},emotionLabel:x=>x};
-const document={getElementById:el,addEventListener(){},body:{classList:{contains(){return true;}}}};
+let created=0;
+const document={getElementById:el,createElement:()=>el('created_'+(++created)),addEventListener(){},body:{classList:{contains(){return true;}}}};
 const context={window:{GameBridge:bridge},document,DialoguePlayer:Director,ReplyPlayer:Reply,
  setInterval:fn=>{timers.set(++clock,fn);return clock;},clearInterval:id=>timers.delete(id),console};
 vm.runInNewContext(fs.readFileSync('studio/web/game.js','utf8'),context);
@@ -40,6 +41,12 @@ const tick=n=>{for(let i=0;i<n;i++)for(const fn of [...timers.values()])fn();};
  await pending;
  assert.equal(el('gameText').textContent,'你好，这是流式文字。后续收到。');
  await el('gameChatStop').onclick();tick(50);assert.equal(mouth.at(-1),false);
+ bridge.models=async()=>[{name:'shi_7',character:'shi',pose_family:'pose_a',outfit_label:'衣服07',preview_url:'/api/model_preview/shi_7'},
+                        {name:'shi_37',character:'shi',pose_family:'pose_b',outfit_label:'衣服07',preview_url:'/api/model_preview/shi_37'}];
+ await el('gameOutfits').onclick();assert.equal(el('gamePickerTitle').textContent,'选择角色');
+ el('gamePickerOptions').children[0].onclick();assert.equal(el('gamePickerTitle').textContent,'shi · 选择姿势');
+ el('gamePickerOptions').children[2].onclick();assert.equal(el('gamePickerTitle').textContent,'shi · 选择衣服');
+ assert.equal(el('gamePickerOptions').children[1].children.at(-1).src,'/api/model_preview/shi_37');
  assert.equal(timers.size,0);
  el('gameChatInput').value='旁白测试';const second=el('gameChatForm').onsubmit({preventDefault(){}});await new Promise(setImmediate);
  preview('海风拂过。','narration');tick(2);assert.equal(mouth.at(-1),false);assert.equal(el('gameSpeaker').textContent,'旁白');

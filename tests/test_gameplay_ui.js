@@ -1,9 +1,10 @@
 const assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm');
 const nodes=new Map(),calls=[];
 function node(id=''){
+ const byId=[...nodes.values()].find(x=>x.id===id);if(byId)return byId;
  if(!nodes.has(id))nodes.set(id,{id,value:id==='kind'?'locations':'',hidden:false,checked:false,children:[],textContent:'',
   append(...x){this.children.push(...x);},after(){},insertBefore(){},replaceChildren(...x){this.children=x;},
-  closest(){return {hidden:false};},getContext(){return {};},scrollIntoView(){},pause(){},removeAttribute(){}});
+  querySelector(){return node('cg-help');},closest(){return {hidden:false};},getContext(){return {};},scrollIntoView(){},pause(){},removeAttribute(){}});
  return nodes.get(id);
 }
 let rules=[{id:'shi_beach',group:'ev_shi_c04',title:'海边',model_prefix:'shi',scenes:['bg05'],keywords:['海边'],enabled:true,loop:true,hold_ms:3000},
@@ -18,7 +19,7 @@ async function fetch(path,opts){const body=opts?.body?JSON.parse(opts.body):unde
  else if(path==='/api/game/catalog/cg_rules')rules=body.definitions;
  return {ok:true,json:async()=>doc};
 }
-vm.runInNewContext(fs.readFileSync('studio/web/gameplay_ui.js','utf8'),{document:{getElementById:node,createElement:()=>node('generated_'+nodes.size)},fetch,console});
+vm.runInNewContext(fs.readFileSync('studio/web/gameplay_ui.js','utf8'),{document:{getElementById:node,createElement:()=>node('generated_'+nodes.size),createTextNode:text=>({textContent:text})},fetch,console});
 const settle=()=>new Promise(setImmediate);
 (async()=>{
  await settle();assert.equal(node('cg-editor').hidden,true);
@@ -28,6 +29,8 @@ const settle=()=>new Promise(setImmediate);
  node('cg-title').value='自定义名字';await node('cg-save').onclick();
  assert.equal(rules.find(x=>x.group==='ev_shi_c08').title,'自定义名字');
  assert.equal(calls.filter(x=>x.path==='/api/game/catalog/cg').length,0); // draft cannot import or enable
+ node('cg-any-location').checked=true;node('cg-any-location').onchange();assert.equal(node('cg-scenes').disabled,true);
+ await node('cg-save').onclick();assert.equal(rules.find(x=>x.group==='ev_shi_c08').any_location,true);
  node('filter').value='c08';node('filter').oninput();assert.equal(node('items').children.length,1);
  await node('scan').onclick();assert.ok(calls.some(x=>x.path==='/api/game/catalog/cg_shi'));
  node('kind').value='locations';await node('kind').onchange();assert.equal(node('cg-editor').hidden,true);

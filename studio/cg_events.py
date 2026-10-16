@@ -34,8 +34,12 @@ def validate_rules(value):
     result=[];ids=set()
     for raw in value:
         keys={'id','title','group','enabled','model_prefix','scenes','keywords','loop','hold_ms'}
-        if not isinstance(raw,dict) or set(raw)!=keys:raise ValueError('CG规则字段不完整或包含执行字段')
+        if not isinstance(raw,dict) or set(raw)-{'min_affection','any_location'}!=keys:raise ValueError('CG规则字段不完整或包含执行字段')
         row=dict(raw)
+        row.setdefault('any_location',False)
+        if type(row['any_location']) is not bool:raise ValueError('任意地点开关必须是布尔值')
+        row.setdefault('min_affection',50)
+        if type(row['min_affection']) is not int or not 0<=row['min_affection']<=100:raise ValueError('好感度门槛需为0～100整数')
         for key in ('id','group','model_prefix'):identifier(row[key],key)
         if row['id'] in ids:raise ValueError('CG事件ID重复')
         ids.add(row['id'])
@@ -46,7 +50,7 @@ def validate_rules(value):
         for key in ('scenes','keywords'):
             if not isinstance(row[key],list) or not 0<=len(row[key])<=30:raise ValueError('场景和关键词各最多30项')
             row[key]=list(dict.fromkeys(bounded_text(x,limit=60) for x in row[key]))
-        if row['enabled'] and (not row['title'] or not row['scenes'] or not row['keywords']):raise ValueError('启用前请填写标题、场景和关键词')
+        if row['enabled'] and (not row['title'] or (not row['any_location'] and not row['scenes']) or not row['keywords']):raise ValueError('启用前请填写标题、关键词，以及场景或任意地点开关')
         if type(row['hold_ms']) is not int or not 500<=row['hold_ms']<=15000:raise ValueError('差分停留时间需为500～15000毫秒')
         result.append(row)
     return result
@@ -73,7 +77,7 @@ def import_shi(app):
         if group in known:continue
         event_id=group
         if any(x['id']==event_id for x in rules):raise ValueError('CG草稿ID与已有规则冲突')
-        rules.append(dict(id=event_id,title='',group=group,model_prefix='shi',scenes=[],keywords=[],enabled=False,loop=True,hold_ms=3000))
+        rules.append(dict(id=event_id,title='',group=group,model_prefix='shi',scenes=[],keywords=[],enabled=False,loop=True,hold_ms=3000,min_affection=50))
     # Save only when new rows were appended, to avoid invalidating active turns.
     if rules!=cat.get('cg_rules')['data']:
         clean=validate_rules(rules)
@@ -120,7 +124,7 @@ def active(app):
     return json.loads(row['doc'])
 
 
-def candidates(app):
+def candidates(app,include_locked=False):
     from .gameplay import catalog
     if active(app):return []
     cat=catalog(app);state=app.game_store().read();scene=state['scene']['location_id'];labels={scene}
@@ -129,8 +133,18 @@ def candidates(app):
         if item.get('location_id')==scene:labels.add(item.get('location_name',''))
     assets=cat.get('media')['data']['assets'];model=app.STATE['settings'].get('character_model','')
     return [rule for rule in cat.get('cg_rules')['data'] if rule['enabled']
-            and model.startswith(rule['model_prefix']+'_') and labels.intersection(rule['scenes'])
+            and (include_locked or state['stats']['affection']>=rule.get('min_affection',50))
+            and model.startswith(rule['model_prefix']+'_') and (rule.get('any_location',False) or labels.intersection(rule['scenes']))
             and any(x.get('group')==rule['group'] and x.get('extension')=='.cgseq' for x in assets)]
+
+
+def keyword_decision(app,text,allowed):
+    if active(app):return None
+    matches=[(len(word),rule['id']) for rule in allowed for word in rule['keywords'] if word.casefold() in text.casefold()]
+    if not matches:return None
+    # Deterministic tie-break: longest matched keyword, then stable event ID.
+    event=sorted(matches,key=lambda x:(-x[0],x[1]))[0][1]
+    return {'action':'enter','event_id':event}
 
 
 def prompt(app,allowed):
@@ -151,6 +165,7 @@ def diagnostics(app,text,allowed,raw,chosen):
     return {'scene':app.game_store().read()['scene']['location_id'],
             'candidate_ids':[x['id'] for x in allowed],
             'keyword_matched_ids':[x['id'] for x in allowed if any(k.casefold() in text.casefold() for k in x['keywords'])],
+            'threshold_blocked_ids':[x['id'] for x in (candidates(app,include_locked=True) if app.asset_root() else []) if x['id'] not in {r['id'] for r in allowed} and any(k.casefold() in text.casefold() for k in x['keywords'])],
             'status':'accepted' if chosen else 'no_candidate' if not allowed and not active(app) else 'model_null' if raw is None else 'invalid_decision',
             'action':chosen['action'] if chosen else None}
 

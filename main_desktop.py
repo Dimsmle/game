@@ -406,6 +406,19 @@ def register_pose_assets(root,pose_files,model,model_name="kan_0"):
 class StudioHandler(studio.Handler):
     """Constrained localhost costume selector; user-supplied names never become filesystem paths."""
     def do_GET(self):
+        if self.path.split('?',1)[0].startswith('/api/model_preview/'):
+            from studio.gameplay_core.common import checked_file
+            from PIL import Image
+            import io
+            try:
+                name=self.path.split('?',1)[0].rsplit('/',1)[-1]
+                if not model_meta.MODEL_PATTERN.fullmatch(name):raise ValueError('无效模型')
+                path=checked_file(self.server.asset_root,'character_exports/'+name+'_neutral.png',allowed_extensions={'.png'})
+                with Image.open(path) as im:
+                    if im.width*im.height>16000000:raise ValueError('预览尺寸过大')
+                    image=im.convert('RGBA');image.thumbnail((190,320));out=io.BytesIO();image.save(out,format='PNG')
+                return self.reply(200,out.getvalue(),'image/png')
+            except (OSError,ValueError):return self.reply(404,{'error':'此造型暂无预览；切换后会生成'})
         if self.path.split("?",1)[0]=="/api/expression_catalog":
             model_id=studio.STATE["settings"].get("character_model","")
             entry=discover_model(self.server.asset_root,model_id)
@@ -422,8 +435,12 @@ class StudioHandler(studio.Handler):
         if self.path.split("?",1)[0]=="/api/character_models":
             root=self.server.asset_root
             found=discover_models(root)
+            metadata=model_meta.load(studio.DATA/'model_metadata.json')
             models=[{
                 "name":v["name"],"label":v["label"],
+                **model_meta.wardrobe(metadata,v['name']),
+                'outfit_label':model_meta.appearance(metadata,v['name'])['outfit_label'],
+                'preview_url':'/api/model_preview/'+v['name'] if (root/'character_exports'/(v['name']+'_neutral.png')).is_file() else None,
                 "available":v["available"],
                 "total_pages":v["total_pages"],
                 "loaded_pages":v["loaded_pages"],
@@ -514,6 +531,8 @@ def start_server(port=8765, root=None):
         try:
             cg_events.setup_beach(studio)
             cg_events.import_shi(studio)
+            from studio import scene_labels
+            scene_labels.install(studio)
         except (OSError,ValueError) as exc:studio.app_log('cg.setup',type(exc).__name__+': CG目录初始化未完成，可重新扫描')
     studio.PLAN_RENDER_ADAPTER=adapt_sequence_behavior
     try:
